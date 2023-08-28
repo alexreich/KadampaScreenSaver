@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Text;
 using System.Text.RegularExpressions;
+using HtmlAgilityPack;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -74,19 +75,45 @@ foreach (string pageUrl in pageUrls)
         break;
     }
 
-    // Download the page
-    logger.LogInformation($"Starting download of {pageUrl}");
-    string pageHtmlContent = await DownloadHtmlContentAsync(pageUrl);
+    var web = new HtmlWeb();
+    var doc = web.Load(pageUrl);
 
-    // Extract image URLs from the page
-    var imageUrls = Regex.Matches(pageHtmlContent, "<img.*?src=[\"'](.*?)[\"']")
-        .Cast<Match>()
-        .Select(match => match.Groups[1].Value)
-        .ToList();
 
-    // Download images
-    foreach (string imageUrl in imageUrls)
+    // Now, using LINQ to get all Images
+    List<HtmlNode> imageNodes = null;
+    imageNodes = (from HtmlNode node in doc.DocumentNode.SelectNodes("//*//img")
+                      //where node.Name == "a"
+                      //&& node.Attributes["class"] != null
+                      //&& node.Attributes["class"].Value.StartsWith("img_")
+                  select node).ToList();
+    var SaveList = new List<string>();
+    foreach (HtmlNode node in imageNodes)
     {
+        //Console.WriteLine(node);
+
+        if (node.Attributes.Any(w => w.Name=="class" && w.Value.Contains("thumbnail") || w.Value.Contains("f1-photo-content")|| w.Value.Contains("fl-photo-img") ))
+            continue;
+
+        string imageUrl = node.Attributes["src"].Value;
+                
+    //}
+        // Download the page
+    //    logger.LogInformation($"Starting download of {pageUrl}");
+    //string pageHtmlContent = await DownloadHtmlContentAsync(pageUrl);
+
+    //// Extract image URLs from the page
+    //var imageUrls = Regex.Matches(pageHtmlContent, "<img.*?src=[\"'](.*?)[\"']")
+    //    .Cast<Match>()
+    //    .Select(match => match.Groups[1].Value)
+    //    .ToList();
+
+    //// Download images
+    //foreach (string imageUrl in imageUrls)
+    //{
+        if (imageUrl.Contains("Mirror-of-Dharma"))
+            System.Diagnostics.Debugger.Break();
+
+
         // Skip images with "150x" in the URL
         if (imageUrl == "" || imageUrl.Contains("150x") || imageUrl.Contains("paperback") || imageUrl.Contains("Book") || imageUrl.Contains("book") || imageUrl.Contains("Gen-"))
         {
@@ -197,6 +224,7 @@ foreach (string file in files)
 
 async Task DownloadFile(string url, string outputPath)
 {
+    logger.LogInformation(url, outputPath);
     byte[] data = await client.GetByteArrayAsync(url);
 
     // Check if file already exists
