@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -89,30 +90,35 @@ foreach (string pageUrl in pageUrls)
         || w.Value.Contains("fl-photo-img"))
         )
         )
-        .ToList();
+    .ToList();
 
-    var saveList = new List<string>();
-    Parallel.ForEach(imageNodes, node =>
+    // filter out images with certain text in the URL
+    var imageUrls = new List<string>();
+    foreach (var node in imageNodes)
     {
         string imageUrl = node.Attributes["src"].Value;
         string imageUrlLower = imageUrl.ToLower();
 
-
-        // Skip images with certain text in the URL
         if (
-        imageUrl == "" ||
-        imageUrlLower.Contains("150x") ||
-        imageUrlLower.Contains("whatsapp-image") ||
-        imageUrlLower.Contains("paperback") ||
-        imageUrlLower.Contains("book") ||
-        imageUrlLower.Contains("gen-") ||
-        imageUrlLower.Contains("1024x") ||
-        imageUrlLower.Contains("adobestock")
+            imageUrl == "" ||
+            imageUrlLower.Contains("150x") ||
+            imageUrlLower.Contains("whatsapp-image") ||
+            imageUrlLower.Contains("paperback") ||
+            imageUrlLower.Contains("book") ||
+            imageUrlLower.Contains("gen-") ||
+            imageUrlLower.Contains("1024x") ||
+            imageUrlLower.Contains("adobestock")
         )
         {
-            return;
+            continue;
         }
 
+        imageUrls.Add(imageUrl);
+    }
+
+    Parallel.ForEach(imageUrls, imageUrl =>
+    {
+        
         try
         {
             string fileName = Path.GetFileName(imageUrl);
@@ -125,22 +131,27 @@ foreach (string pageUrl in pageUrls)
 
             // Check image dimensions
             byte[] imageBytes = File.ReadAllBytes(savePath);
+            bool deleteImage = false;
             using (var memoryStream = new MemoryStream(imageBytes))
+            using (var image = Image.FromStream(memoryStream))
             {
-                using (var image = Image.FromStream(memoryStream))
+                if (image.Width < 1024)
                 {
-                    if (image.Width < 1024)
-                    {
-                        // Delete image if width is less than 1024
-                        File.Delete(savePath);
-                        logger.LogWarning($"Deleted image: {fileName} because it was smaller than 1024px");
-                    }
-                    else
-                    {
-                        logger.LogInformation($"Downloaded image: {fileName}");
-                    }
+                    // Set flag to delete image if width is less than 1024
+                    deleteImage = true;
+                }
+                else
+                {
+                    logger.LogInformation($"Downloaded image: {fileName}");
                 }
             }
+
+            if (deleteImage)
+            {
+                File.Delete(savePath);
+                logger.LogWarning($"Deleted image: {fileName} because it was smaller than 1024px");
+            }
+
         }
         catch (Exception ex)
         {
@@ -232,8 +243,6 @@ async Task DownloadFile(string url, string outputPath)
 async Task<string> DownloadHtmlContentAsync(string url)
 {
     using var httpClient = new HttpClient();
-    var response = await httpClient.GetAsync(url);
-    var stream = await response.Content.ReadAsStreamAsync();
-    using var streamReader = new StreamReader(stream);
-    return await streamReader.ReadToEndAsync();
+    var response = await httpClient.GetStringAsync(url);
+    return response;
 }
