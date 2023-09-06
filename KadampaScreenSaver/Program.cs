@@ -78,46 +78,39 @@ foreach (string pageUrl in pageUrls)
     var web = new HtmlWeb();
     var doc = web.Load(pageUrl);
 
-
     // Now, using LINQ to get all Images
-    List<HtmlNode> imageNodes = null;
-    imageNodes = (from HtmlNode node in doc.DocumentNode.SelectNodes("//*//img")
-                      //where node.Name == "a"
-                      //&& node.Attributes["class"] != null
-                      //&& node.Attributes["class"].Value.StartsWith("img_")
-                  select node).ToList();
-    var SaveList = new List<string>();
-    foreach (HtmlNode node in imageNodes)
+    var imageNodes = doc.DocumentNode.SelectNodes("//*//img")
+        .Where(node =>
+        !node.Attributes.Any(a => a.Value.Contains("pp-post-img")) &&
+        (
+        node.Attributes.Any(w => w.Name == "class" && w.Value.Contains("thumbnail")
+        || w.Value.Contains("gallery-img")
+        || w.Value.Contains("f1-photo-content")
+        || w.Value.Contains("fl-photo-img"))
+        )
+        )
+        .ToList();
+
+    var saveList = new List<string>();
+    Parallel.ForEach(imageNodes, node =>
     {
-        //Console.WriteLine(node);
-
-        if (node.Attributes.Any(w => w.Name=="class" && w.Value.Contains("thumbnail") || w.Value.Contains("f1-photo-content")|| w.Value.Contains("fl-photo-img") ))
-            continue;
-
         string imageUrl = node.Attributes["src"].Value;
-                
-    //}
-        // Download the page
-    //    logger.LogInformation($"Starting download of {pageUrl}");
-    //string pageHtmlContent = await DownloadHtmlContentAsync(pageUrl);
-
-    //// Extract image URLs from the page
-    //var imageUrls = Regex.Matches(pageHtmlContent, "<img.*?src=[\"'](.*?)[\"']")
-    //    .Cast<Match>()
-    //    .Select(match => match.Groups[1].Value)
-    //    .ToList();
-
-    //// Download images
-    //foreach (string imageUrl in imageUrls)
-    //{
-        if (imageUrl.Contains("Mirror-of-Dharma"))
-            System.Diagnostics.Debugger.Break();
+        string imageUrlLower = imageUrl.ToLower();
 
 
-        // Skip images with "150x" in the URL
-        if (imageUrl == "" || imageUrl.Contains("150x") || imageUrl.Contains("paperback") || imageUrl.Contains("Book") || imageUrl.Contains("book") || imageUrl.Contains("Gen-"))
+        // Skip images with certain text in the URL
+        if (
+        imageUrl == "" ||
+        imageUrlLower.Contains("150x") ||
+        imageUrlLower.Contains("whatsapp-image") ||
+        imageUrlLower.Contains("paperback") ||
+        imageUrlLower.Contains("book") ||
+        imageUrlLower.Contains("gen-") ||
+        imageUrlLower.Contains("1024x") ||
+        imageUrlLower.Contains("adobestock")
+        )
         {
-            continue;
+            return;
         }
 
         try
@@ -126,12 +119,12 @@ foreach (string pageUrl in pageUrls)
             string savePath = Path.Combine(baseDirectory, fileName);
 
             // Download the image
-            await DownloadFile(imageUrl, savePath);
+            DownloadFile(imageUrl, savePath).Wait();
 
-            if (!File.Exists(savePath)) { continue; }
+            if (!File.Exists(savePath)) { return; }
 
             // Check image dimensions
-            byte[] imageBytes = await File.ReadAllBytesAsync(savePath);
+            byte[] imageBytes = File.ReadAllBytes(savePath);
             using (var memoryStream = new MemoryStream(imageBytes))
             {
                 using (var image = Image.FromStream(memoryStream))
@@ -154,7 +147,7 @@ foreach (string pageUrl in pageUrls)
             // Logging error in downloading image
             logger.LogError($"Error downloading image: {imageUrl}. Error: {ex.Message}");
         }
-    }
+    });
 
     // Download video
     try
