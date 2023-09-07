@@ -8,6 +8,7 @@ using System.Xml.Linq;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Drawing.Imaging;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
