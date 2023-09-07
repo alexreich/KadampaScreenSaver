@@ -136,17 +136,3 @@ jobs:
         name: 'Unpackaged app'
         path: 'KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
         
-
-    - name: Create GH release
-      if: github.ref_name == 'main'
-      uses: softprops/action-gh-release@v1
-      with:
-        draft: false
-        prerelease: false
-        name: '0.${{ github.run_number }}.${{ github.run_attempt }}.0'
-        tag_name: 'v0.${{ github.run_number }}.${{ github.run_attempt }}.0'
-        body: 'To install the MSIX version, you first have to add the certificate included in the MSIX (only need to do that once). To install the unpackaged version, you need to install the x64 WinAppRuntime Installer.'
-        files: |
-          KadampaScreenSaver/Packages/**/KadampaScreenSaver*.msix
-          KadampaScreenSaver-unpackaged-*.zip
-        fail_on_unmatched_files: true
