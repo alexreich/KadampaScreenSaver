@@ -20,6 +20,7 @@ int linkDepth = configuration.GetValue<int>("Policies:LinkDepth");
 int retentionDays = configuration.GetValue<int>("Policies:RetentionDays");
 string baseDirectory = configuration.GetValue<string>("Directories:Base");
 string subDirectory = configuration.GetValue<string>("Directories:SubDirectory");
+string fontName = configuration.GetValue<string>("PhotoText:Font");
 if (configuration.GetValue<bool>("Directories:UseMyPictures"))
 {
     baseDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), subDirectory);
@@ -80,6 +81,20 @@ foreach (string pageUrl in pageUrls)
     var web = new HtmlWeb();
     var doc = web.Load(pageUrl);
 
+    // Extract the page title
+    var pageTitle = "";
+    var pageTitleNode = doc.DocumentNode.SelectSingleNode("//title");
+    if (pageTitleNode != null)
+    {
+        pageTitle = pageTitleNode.InnerText.Trim();
+
+        // Decode HTML entities
+        pageTitle = System.Net.WebUtility.HtmlDecode(pageTitle);
+
+        // Remove extra spaces
+        pageTitle = Regex.Replace(pageTitle, @"\s+", " ");
+    }
+
     // Now, using LINQ to get all Images
     var imageNodes = doc.DocumentNode.SelectNodes("//*//img")
         .Where(node =>
@@ -119,7 +134,7 @@ foreach (string pageUrl in pageUrls)
 
     Parallel.ForEach(imageUrls, imageUrl =>
     {
-        
+
         try
         {
             string fileName = Path.GetFileName(imageUrl);
@@ -151,6 +166,84 @@ foreach (string pageUrl in pageUrls)
             {
                 File.Delete(savePath);
                 logger.LogWarning($"Deleted image: {fileName} because it was smaller than 1024px");
+            }
+            else
+            {
+                if (configuration.GetValue<bool>("Directories:PhotoText"))
+                {
+                    // Add text to image
+                    Bitmap newBitmap;
+                    using (Bitmap bitmap = (Bitmap)Image.FromFile(savePath))
+                    {
+                        using (Graphics graphics = Graphics.FromImage(bitmap))
+                        {
+                            string imageNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+                            string textToAdd = $"{pageTitle}";
+                            if (configuration.GetValue<bool>("PhotoText:ImageFileName"))
+                            {
+                                textToAdd += $"\n{imageNameWithoutExtension}";
+                            }
+                            if (configuration.GetValue<bool>("PhotoText:RemoveDashKadampaBuddhism"))
+                            {
+                                textToAdd = textToAdd.Replace(" - Kadampa Buddhism", "");
+                            }
+
+                            // Target width for the text, considering 33% margin on either side
+                            float targetTextWidth = bitmap.Width * 0.34f; // 66% of the image width
+
+                            int fontSize = 30; // Starting font size
+                            SizeF textSize;
+                            Font arialFont;
+
+                            // Calculate average color of the top area of the image
+                            Color avgColor = CalculateAverageColor(bitmap, 20); // Analyzing top 20% of the image
+
+                            // Define Kadampa brand colors
+                            List<Color> brandColors = new List<Color>
+                            {
+                                ColorTranslator.FromHtml("#224486"), // Dark Blue
+                                ColorTranslator.FromHtml("#A99886"), // Beige
+                                ColorTranslator.FromHtml("#66B9C4"), // Light Blue
+                                ColorTranslator.FromHtml("#358DCB"), // Medium Blue
+                                ColorTranslator.FromHtml("#BE303C"), // Red
+                                ColorTranslator.FromHtml("#48ADF4")  // Sky Blue
+                            };
+
+                            // Find the most contrasting color
+                            Color textColor = FindContrastingColor(avgColor, brandColors);
+
+                            // Loop to increase font size until the text fits within the target width or reaches a maximum limit
+                            do
+                            {
+                                arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel);
+                                textSize = graphics.MeasureString(textToAdd, arialFont);
+                                fontSize++;
+                            } while (textSize.Width < targetTextWidth && fontSize <= 100); // Limit the font size to a maximum
+
+                            // Adjust font size down to fit within the target width
+                            fontSize--;
+                            if (fontSize > 0)
+                            {
+                                using (arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel))
+                                {
+                                    // Recalculate text size and position
+                                    textSize = graphics.MeasureString(textToAdd, arialFont);
+                                    float x = (bitmap.Width - textSize.Width) / 2;
+                                    float y = Math.Max(10, (bitmap.Height * 0.05f)); // Adjust for vertical position
+
+                                    // Draw the text
+                                    graphics.DrawString(textToAdd, arialFont, new SolidBrush(textColor), new PointF(x, y));
+                                }
+                            }
+                        }
+                        newBitmap = new Bitmap(bitmap);
+                    }
+
+                    newBitmap.Save(savePath); // Save the image file
+                    newBitmap.Dispose();
+
+                }
+
             }
 
         }
@@ -226,6 +319,49 @@ foreach (string file in files)
         }
     }
 }
+Color FindContrastingColor(Color baseColor, List<Color> brandColors)
+{
+    Color contrastingColor = brandColors[0];
+    double maxDistance = 0;
+
+    foreach (var brandColor in brandColors)
+    {
+        // Calculate the Euclidean distance in the RGB space
+        double distance = Math.Sqrt(
+            Math.Pow(brandColor.R - baseColor.R, 2) +
+            Math.Pow(brandColor.G - baseColor.G, 2) +
+            Math.Pow(brandColor.B - baseColor.B, 2));
+
+        if (distance > maxDistance)
+        {
+            maxDistance = distance;
+            contrastingColor = brandColor;
+        }
+    }
+
+    return contrastingColor;
+}
+Color CalculateAverageColor(Bitmap bmp, int areaHeightPercent)
+{
+    int totalR = 0, totalG = 0, totalB = 0;
+    int startY = 0;
+    int endY = bmp.Height * areaHeightPercent / 100;
+
+    for (int y = startY; y < endY; y++)
+    {
+        for (int x = 0; x < bmp.Width; x++)
+        {
+            Color pixel = bmp.GetPixel(x, y);
+            totalR += pixel.R;
+            totalG += pixel.G;
+            totalB += pixel.B;
+        }
+    }
+
+    int totalPixels = bmp.Width * (endY - startY);
+    return Color.FromArgb(totalR / totalPixels, totalG / totalPixels, totalB / totalPixels);
+}
+
 
 async Task DownloadFile(string url, string outputPath)
 {
