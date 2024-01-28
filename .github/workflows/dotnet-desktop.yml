@@ -12,6 +12,7 @@ jobs:
     strategy:
       matrix:
         configuration: [Release]
+        platform: [Any CPU] # Adjusted
 
     runs-on: windows-latest
 
