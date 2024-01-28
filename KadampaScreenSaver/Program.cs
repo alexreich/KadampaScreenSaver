@@ -9,6 +9,8 @@ using HtmlAgilityPack;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Drawing.Imaging;
+using System.Linq;
+using static System.Net.Mime.MediaTypeNames;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
@@ -21,6 +23,16 @@ int retentionDays = configuration.GetValue<int>("Policies:RetentionDays");
 string baseDirectory = configuration.GetValue<string>("Directories:Base");
 string subDirectory = configuration.GetValue<string>("Directories:SubDirectory");
 string fontName = configuration.GetValue<string>("PhotoText:Font");
+// Define Kadampa brand colors
+List<Color> brandColors = new List<Color>
+                            {
+                                ColorTranslator.FromHtml("#224486"), // Dark Blue
+                                ColorTranslator.FromHtml("#A99886"), // Beige
+                                ColorTranslator.FromHtml("#66B9C4"), // Light Blue
+                                ColorTranslator.FromHtml("#358DCB"), // Medium Blue
+                                ColorTranslator.FromHtml("#BE303C"), // Red
+                                ColorTranslator.FromHtml("#48ADF4")  // Sky Blue
+                            };
 if (configuration.GetValue<bool>("Directories:UseMyPictures"))
 {
     baseDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), subDirectory);
@@ -81,19 +93,9 @@ foreach (string pageUrl in pageUrls)
     var web = new HtmlWeb();
     var doc = web.Load(pageUrl);
 
-    // Extract the page title
-    var pageTitle = "";
-    var pageTitleNode = doc.DocumentNode.SelectSingleNode("//title");
-    if (pageTitleNode != null)
-    {
-        pageTitle = pageTitleNode.InnerText.Trim();
-
-        // Decode HTML entities
-        pageTitle = System.Net.WebUtility.HtmlDecode(pageTitle);
-
-        // Remove extra spaces
-        pageTitle = Regex.Replace(pageTitle, @"\s+", " ");
-    }
+    var ogDescription = doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty);
+    var title = doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty);
+    var publishedTime = doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty);
 
     // Now, using LINQ to get all Images
     var imageNodes = doc.DocumentNode.SelectNodes("//*//img")
@@ -107,6 +109,7 @@ foreach (string pageUrl in pageUrls)
         )
         )
     .ToList();
+
 
     // filter out images with certain text in the URL
     var imageUrls = new List<string>();
@@ -137,6 +140,9 @@ foreach (string pageUrl in pageUrls)
 
         try
         {
+            //if (imageUrl.Contains("NKT-IKBU-New_Kadampa-2024-KMC-Fort-Collins-IMG_20231220_180758927.jpg"))
+            //    System.Diagnostics.Debugger.Break();
+
             string fileName = Path.GetFileName(imageUrl);
             string savePath = Path.Combine(baseDirectory, fileName);
 
@@ -149,7 +155,7 @@ foreach (string pageUrl in pageUrls)
             byte[] imageBytes = File.ReadAllBytes(savePath);
             bool deleteImage = false;
             using (var memoryStream = new MemoryStream(imageBytes))
-            using (var image = Image.FromStream(memoryStream))
+            using (var image = System.Drawing.Image.FromStream(memoryStream))
             {
                 if (image.Width < 1024)
                 {
@@ -173,68 +179,25 @@ foreach (string pageUrl in pageUrls)
                 {
                     // Add text to image
                     Bitmap newBitmap;
-                    using (Bitmap bitmap = (Bitmap)Image.FromFile(savePath))
+                    using (Bitmap bitmap = (Bitmap)System.Drawing.Image.FromFile(savePath))
                     {
                         using (Graphics graphics = Graphics.FromImage(bitmap))
                         {
                             string imageNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
-                            string textToAdd = $"{pageTitle}";
+                            string textToAdd = $"{title}";
+                            if (configuration.GetValue<bool>("PhotoText:DateInclude"))
+                            {
+                                textToAdd += configuration.GetValue<string>("PhotoText:DatePrefix");
+                                textToAdd += $"{DateTime.Parse(publishedTime).ToString(configuration.GetValue<string>("PhotoText:DateFormat"))}";
+                            }
+                            //textToAdd += $"\n{ogDescription}";
                             if (configuration.GetValue<bool>("PhotoText:ImageFileName"))
                             {
                                 textToAdd += $"\n{imageNameWithoutExtension}";
                             }
-                            if (configuration.GetValue<bool>("PhotoText:RemoveDashKadampaBuddhism"))
-                            {
-                                textToAdd = textToAdd.Replace(" - Kadampa Buddhism", "");
-                            }
 
-                            // Target width for the text, considering 33% margin on either side
-                            float targetTextWidth = bitmap.Width * 0.34f; // 66% of the image width
-
-                            int fontSize = 30; // Starting font size
-                            SizeF textSize;
-                            Font arialFont;
-
-                            // Calculate average color of the top area of the image
-                            Color avgColor = CalculateAverageColor(bitmap, 20); // Analyzing top 20% of the image
-
-                            // Define Kadampa brand colors
-                            List<Color> brandColors = new List<Color>
-                            {
-                                ColorTranslator.FromHtml("#224486"), // Dark Blue
-                                ColorTranslator.FromHtml("#A99886"), // Beige
-                                ColorTranslator.FromHtml("#66B9C4"), // Light Blue
-                                ColorTranslator.FromHtml("#358DCB"), // Medium Blue
-                                ColorTranslator.FromHtml("#BE303C"), // Red
-                                ColorTranslator.FromHtml("#48ADF4")  // Sky Blue
-                            };
-
-                            // Find the most contrasting color
-                            Color textColor = FindContrastingColor(avgColor, brandColors);
-
-                            // Loop to increase font size until the text fits within the target width or reaches a maximum limit
-                            do
-                            {
-                                arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel);
-                                textSize = graphics.MeasureString(textToAdd, arialFont);
-                                fontSize++;
-                            } while (textSize.Width < targetTextWidth && fontSize <= 100); // Limit the font size to a maximum
-
-                            // Adjust font size down to fit within the target width
-                            fontSize--;
-                            if (fontSize > 0)
-                            {
-                                using (arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel))
-                                {
-                                    // Recalculate text size and position
-                                    textSize = graphics.MeasureString(textToAdd, arialFont);
-                                    float x = (bitmap.Width - textSize.Width) / 2;
-                                    float y = Math.Max(10, (bitmap.Height * 0.05f)); // Adjust for vertical position
-
-                                    // Draw the text
-                                    graphics.DrawString(textToAdd, arialFont, new SolidBrush(textColor), new PointF(x, y));
-                                }
-                            }
+                            DrawTextOnImage(graphics, bitmap, textToAdd, fontName, brandColors, true);
+                            DrawTextOnImage(graphics, bitmap, ogDescription, fontName, brandColors, false);
                         }
                         newBitmap = new Bitmap(bitmap);
                     }
@@ -254,42 +217,43 @@ foreach (string pageUrl in pageUrls)
         }
     });
 
-    // Download video
-    try
-    {
-        // Extract the part of the URL after the last slash
-        string fileName = pageUrl.Substring(pageUrl.LastIndexOf("/") + 1);
+    //removing as youtube-dl is no longer maintained / may reviist
+    //// Download video
+    //try
+    //{
+    //    // Extract the part of the URL after the last slash
+    //    string fileName = pageUrl.Substring(pageUrl.LastIndexOf("/") + 1);
 
-        // Replace any characters that are not allowed in filenames
-        fileName = fileName.Replace('[', '-').Replace('\\', '-').Replace('/', '-')
-            .Replace(':', '-').Replace('*', '-').Replace('?', '-')
-            .Replace('"', '-').Replace('<', '-').Replace('>', '-')
-            .Replace('|', '-');
+    //    // Replace any characters that are not allowed in filenames
+    //    fileName = fileName.Replace('[', '-').Replace('\\', '-').Replace('/', '-')
+    //        .Replace(':', '-').Replace('*', '-').Replace('?', '-')
+    //        .Replace('"', '-').Replace('<', '-').Replace('>', '-')
+    //        .Replace('|', '-');
 
-        // Add the directory and extension to the filename
-        string outputPath = Path.Combine(baseDirectory, $"{fileName}.mp4");
+    //    // Add the directory and extension to the filename
+    //    string outputPath = Path.Combine(baseDirectory, $"{fileName}.mp4");
 
-        // Prepare the processStartInfo
-        var processStartInfo = new ProcessStartInfo
-        {
-            FileName = "youtube-dl",
-            Arguments = $"-f mp4 -o \"{outputPath}\" {pageUrl}",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
+    //    // Prepare the processStartInfo
+    //    var processStartInfo = new ProcessStartInfo
+    //    {
+    //        FileName = "youtube-dl",
+    //        Arguments = $"-f mp4 -o \"{outputPath}\" {pageUrl}",
+    //        RedirectStandardOutput = true,
+    //        RedirectStandardError = true,
+    //        UseShellExecute = false,
+    //        CreateNoWindow = true,
+    //    };
 
-        // Start the process
-        var process = Process.Start(processStartInfo);
+    //    // Start the process
+    //    var process = Process.Start(processStartInfo);
 
-        // Wait for the process to finish
-        process.WaitForExit();
-    }
-    catch (Exception ex)
-    {
-        logger.LogError($"Error downloading video: {ex.Message}");
-    }
+    //    // Wait for the process to finish
+    //    process.WaitForExit();
+    //}
+    //catch (Exception ex)
+    //{
+    //    logger.LogError($"Error downloading video: {ex.Message}");
+    //}
 
     pageCount++;
 }
@@ -383,3 +347,40 @@ async Task<string> DownloadHtmlContentAsync(string url)
     var response = await httpClient.GetStringAsync(url);
     return response;
 }
+
+
+
+// General function to handle text drawing
+void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text, string fontName, List<Color> brandColors, bool isHeader)
+{
+    float targetTextWidth = bitmap.Width * 0.80f; // Adjusted for more margin
+    int initialFontSize = isHeader ? 10 : 8; // Starting font size
+    int maxFontSize = 60; // More reasonable maximum
+    SizeF textSize;
+    Font arialFont;
+
+    Color avgColor = isHeader ? CalculateAverageColor(bitmap, 20) : CalculateAverageColor(bitmap, 80);
+    Color textColor = FindContrastingColor(avgColor, brandColors);
+
+    int fontSize = initialFontSize;
+    do
+    {
+        arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel);
+        textSize = graphics.MeasureString(text, arialFont, (int)targetTextWidth);
+        fontSize++;
+    } while (textSize.Width < targetTextWidth && fontSize <= maxFontSize);
+
+    fontSize--;
+    if (fontSize > 0)
+    {
+        using (arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel))
+        {
+            textSize = graphics.MeasureString(text, arialFont, (int)targetTextWidth);
+            float x = (bitmap.Width - textSize.Width) / 2;
+            float y = isHeader ? Math.Max(10, (bitmap.Height * 0.05f)) : (bitmap.Height - textSize.Height - bitmap.Height * 0.02f); // Adjusted Y position for footer
+
+            graphics.DrawString(text, arialFont, new SolidBrush(textColor), new RectangleF(x, y, targetTextWidth, textSize.Height));
+        }
+    }
+}
+
