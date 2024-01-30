@@ -144,6 +144,7 @@ foreach (string pageUrl in pageUrls)
             //    System.Diagnostics.Debugger.Break();
 
             string fileName = Path.GetFileName(imageUrl);
+            fileName = DateTime.Parse(publishedTime).ToString("yyMMdd ") + fileName;
             string savePath = Path.Combine(baseDirectory, fileName);
 
             // Download the image
@@ -357,7 +358,7 @@ void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text, string fontN
     int initialFontSize = isHeader ? 10 : 8; // Starting font size
     int maxFontSize = 60; // More reasonable maximum
     SizeF textSize;
-    Font arialFont;
+    System.Drawing.Font arialFont;
 
     Color avgColor = isHeader ? CalculateAverageColor(bitmap, 20) : CalculateAverageColor(bitmap, 80);
     Color textColor = FindContrastingColor(avgColor, brandColors);
@@ -365,7 +366,7 @@ void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text, string fontN
     int fontSize = initialFontSize;
     do
     {
-        arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel);
+        arialFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel);
         textSize = graphics.MeasureString(text, arialFont, (int)targetTextWidth);
         fontSize++;
     } while (textSize.Width < targetTextWidth && fontSize <= maxFontSize);
@@ -373,7 +374,7 @@ void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text, string fontN
     fontSize--;
     if (fontSize > 0)
     {
-        using (arialFont = new Font(fontName, fontSize, GraphicsUnit.Pixel))
+        using (arialFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel))
         {
             textSize = graphics.MeasureString(text, arialFont, (int)targetTextWidth);
             float x = (bitmap.Width - textSize.Width) / 2;
