@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using System.Drawing.Imaging;
 using System.Linq;
 using static System.Net.Mime.MediaTypeNames;
+using System.Net;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
@@ -93,9 +94,9 @@ foreach (string pageUrl in pageUrls)
     var web = new HtmlWeb();
     var doc = web.Load(pageUrl);
 
-    var ogDescription = doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty);
-    var title = doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty);
-    var publishedTime = doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty);
+    var ogDescription = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty));
+    var title = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty));
+    var publishedTime = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty));
 
     // Now, using LINQ to get all Images
     var imageNodes = doc.DocumentNode.SelectNodes("//*//img")
@@ -144,7 +145,8 @@ foreach (string pageUrl in pageUrls)
             //    System.Diagnostics.Debugger.Break();
 
             string fileName = Path.GetFileName(imageUrl);
-            fileName = DateTime.Parse(publishedTime).ToString("yyMMdd ") + fileName;
+            fileName = (9999 - DateTime.Parse(publishedTime).Year).ToString("0000") + (12 - DateTime.Parse(publishedTime).Month).ToString("00") + (31 - DateTime.Parse(publishedTime).Day).ToString("00") + "_" + fileName;
+            //fileName = DateTime.Parse(publishedTime).ToString("yyyyMMdd_") + fileName;
             string savePath = Path.Combine(baseDirectory, fileName);
 
             // Download the image
@@ -205,7 +207,8 @@ foreach (string pageUrl in pageUrls)
 
                     newBitmap.Save(savePath); // Save the image file
                     newBitmap.Dispose();
-
+                    File.SetCreationTime(savePath, DateTime.Parse(publishedTime));
+                    File.SetLastWriteTime(savePath, DateTime.Parse(publishedTime));
                 }
 
             }
