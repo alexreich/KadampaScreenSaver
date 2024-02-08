@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         configuration: [Release]
-        platform: [Any CPU] # Adjusted
+        platform: [Any CPU]
 
     runs-on: windows-latest
 
@@ -43,38 +43,31 @@ jobs:
         $certificatePath = Join-Path -Path $env:Project_Directory -ChildPath KadampaScreenSaver_TemporaryKey.pfx
         [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
 
-    - name: Create the app package
-      run: msbuild $env:Solution_Name /p:AppxBundlePlatforms="x64" /p:Configuration=$env:Configuration /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxBundle=Never /p:PackageCertificateKeyFile=KadampaScreenSaver_TemporaryKey.pfx /p:AppxPackageDir="Packages\" /p:GenerateAppxPackageOnBuild=true
+    - name: Extract version
+      id: get_version
+      run: |
+        $csprojPath = '${{ env.Project_Directory }}/KadampaScreenSaver.csproj'
+        $csproj = [xml](Get-Content $csprojPath)
+        $version = $csproj.Project.PropertyGroup.Version
+        echo "VERSION=$version" >> $GITHUB_ENV
+      shell: pwsh
+
+    - name: Build the application
+      run: msbuild $env:Solution_Name /p:Configuration=$env:Configuration /p:Platform="${{ matrix.platform }}"
       env:
         Configuration: ${{ matrix.configuration }}
 
-    - name: Upload MSIX Package
-      uses: actions/upload-artifact@v2
-      with:
-        name: MSIX Package
-        path: KadampaScreenSaver/Packages/**/*.msix
-    
-    - name: Build unpackaged app
-      run: msbuild $env:Solution_Name /t:Publish /p:WindowsPackageType=None /p:Configuration=$env:Configuration /p:Platform="Any CPU"
+    - name: Publish the application
+      run: msbuild $env:Solution_Name /t:Publish /p:WindowsPackageType=None /p:Configuration=$env:Configuration /p:Platform="${{ matrix.platform }}"
       env:
         Configuration: ${{ matrix.configuration }}
+
     - name: Create ZIP of unpackaged app
-      run: Compress-Archive -Path KadampaScreenSaver/bin/Release/net8.0/publish/* -DestinationPath 'KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
+      run: Compress-Archive -Path "${{ env.Project_Directory }}/bin/${{ matrix.configuration }}/net8.0/publish/*" -DestinationPath "${{ env.Project_Directory }}/KadampaScreenSaver-$env:VERSION.zip"
+      shell: pwsh
 
     - name: Upload unpackaged app
       uses: actions/upload-artifact@v2
       with:
-        name: Unpackaged app
-        path: KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip
-
-    # - name: Create ZIP of unpackaged app
-    #   run: Compress-Archive -Path KadampaScreenSaver/bin/Release/net8.0/publish/* -DestinationPath 'KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
-
-    # # - name: Create ZIP of unpackaged app
-    #   # run: Compress-Archive KadampaScreenSaver/bin/x64/${{ matrix.configuration }}/net8.0-windows/* 'KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
-
-    # - name: Upload unpackaged app
-    #   uses: actions/upload-artifact@v2
-    #   with:
-    #     name: Unpackaged app
-    #     path: KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip
+        name: KadampaScreenSaver-$env:VERSION
+        path: "${{ env.Project_Directory }}/KadampaScreenSaver-$env:VERSION.zip"
