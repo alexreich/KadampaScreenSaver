@@ -53,9 +53,9 @@ jobs:
       with:
         name: MSIX Package
         path: KadampaScreenSaver/Packages/**/*.msix
-
+    
     - name: Build unpackaged app
-      run: msbuild $env:Solution_Name /t:Publish /p:WindowsPackageType=None /p:Configuration=$env:Configuration /p:Platform=x64
+      run: msbuild $env:Solution_Name /t:Publish /p:WindowsPackageType=None /p:Configuration=$env:Configuration /p:Platform="Any CPU"
       env:
         Configuration: ${{ matrix.configuration }}
 
