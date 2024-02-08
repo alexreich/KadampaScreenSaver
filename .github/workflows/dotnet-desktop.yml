@@ -60,7 +60,10 @@ jobs:
         Configuration: ${{ matrix.configuration }}
 
     - name: Create ZIP of unpackaged app
-      run: Compress-Archive KadampaScreenSaver/bin/x64/${{ matrix.configuration }}/net8.0-windows/* 'KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
+      run: Compress-Archive -Path KadampaScreenSaver/bin/Release/net8.0/publish/* -DestinationPath 'KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
+
+    # - name: Create ZIP of unpackaged app
+      # run: Compress-Archive KadampaScreenSaver/bin/x64/${{ matrix.configuration }}/net8.0-windows/* 'KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
 
     - name: Upload unpackaged app
       uses: actions/upload-artifact@v2
