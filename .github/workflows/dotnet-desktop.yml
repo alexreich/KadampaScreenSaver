@@ -30,7 +30,7 @@ jobs:
         dotnet-version: '8.0.x'
 
     - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@v1.0.2
+      uses: microsoft/setup-msbuild@v2
 
     - name: Restore the application
       run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
@@ -63,11 +63,10 @@ jobs:
         Configuration: ${{ matrix.configuration }}
 
     - name: Create ZIP of unpackaged app
-      run: Compress-Archive -Path "${{ env.Project_Directory }}/bin/${{ matrix.configuration }}/net8.0/publish/*" -DestinationPath "${{ env.Project_Directory }}/KadampaScreenSaver-$env:VERSION.zip"
-      shell: pwsh
-
+      run: Compress-Archive -Path "KadampaScreenSaver/bin/Release/net8.0/publish/*" -DestinationPath "KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip"
+  
     - name: Upload unpackaged app
       uses: actions/upload-artifact@v2
       with:
-        name: KadampaScreenSaver-$env:VERSION
-        path: "${{ env.Project_Directory }}/KadampaScreenSaver-$env:VERSION.zip"
+        name: KadampaScreenSaver-${{ env.VERSION }}.zip
+        path: KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip
