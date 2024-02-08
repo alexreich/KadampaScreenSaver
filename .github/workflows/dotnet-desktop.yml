@@ -58,15 +58,23 @@ jobs:
       run: msbuild $env:Solution_Name /t:Publish /p:WindowsPackageType=None /p:Configuration=$env:Configuration /p:Platform="Any CPU"
       env:
         Configuration: ${{ matrix.configuration }}
-
     - name: Create ZIP of unpackaged app
       run: Compress-Archive -Path KadampaScreenSaver/bin/Release/net8.0/publish/* -DestinationPath 'KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
-
-    # - name: Create ZIP of unpackaged app
-      # run: Compress-Archive KadampaScreenSaver/bin/x64/${{ matrix.configuration }}/net8.0-windows/* 'KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
 
     - name: Upload unpackaged app
       uses: actions/upload-artifact@v2
       with:
         name: Unpackaged app
-        path: KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip
+        path: KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip
+
+    # - name: Create ZIP of unpackaged app
+    #   run: Compress-Archive -Path KadampaScreenSaver/bin/Release/net8.0/publish/* -DestinationPath 'KadampaScreenSaver-unpackaged-${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
+
+    # # - name: Create ZIP of unpackaged app
+    #   # run: Compress-Archive KadampaScreenSaver/bin/x64/${{ matrix.configuration }}/net8.0-windows/* 'KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip'
+
+    # - name: Upload unpackaged app
+    #   uses: actions/upload-artifact@v2
+    #   with:
+    #     name: Unpackaged app
+    #     path: KadampaScreenSaver-unpackaged-0.${{ github.run_number }}.${{ github.run_attempt }}.0.zip
