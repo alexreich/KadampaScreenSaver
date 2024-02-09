@@ -1,5 +1,9 @@
 name: .NET Core Desktop
 
+permissions:
+  contents: write
+  issues: write # to write releases
+
 on:
   push:
     branches: [ main ]
