@@ -75,12 +75,11 @@ jobs:
         path: KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip
     - name: Create GitHub Release
       run: |
-        gh release create $env:VERSION \
-          --title "Release $env:VERSION" \
-          --notes "Release notes for version $env:VERSION" \
-          -a "KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip" \
+        & gh release create $env:VERSION `
+          --title "Release $env:VERSION" `
+          --notes "Release notes for version $env:VERSION" `
+          -a "KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip" `
           --target main
+      shell: pwsh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      shell: pwsh
-
