@@ -13,6 +13,22 @@ using System.Linq;
 using static System.Net.Mime.MediaTypeNames;
 using System.Net;
 
+
+//
+//TaskDefinition td = t.Definition;
+//t.Definition.Triggers.First().StartBoundary = today.AddDays(day);
+
+//Console.WriteLine(t.Definition.Triggers.First().StartBoundary);
+//day++;
+//td.Principal.RunLevel = TaskRunLevel.Highest;
+//td.Principal.LogonType = TaskLogonType.InteractiveToken;
+//td.Settings.MultipleInstances = TaskInstancesPolicy.IgnoreNew;
+////td.Settings.RunOnlyIfLoggedOn = true;
+//TaskService.Instance.RootFolder.RegisterTaskDefinition(t.Name, t.Definition, TaskCreation.Update, ConfigurationManager.AppSettings["username"], ConfigurationManager.AppSettings["password"], TaskLogonType.InteractiveToken);
+
+//todo - fix bug where page title updates and overwrites wrong pict (solution - download again)
+
+
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
 IConfigurationRoot configuration = new ConfigurationBuilder()
@@ -339,8 +355,9 @@ async Task DownloadFile(string url, string outputPath)
     // Check if file already exists
     if (File.Exists(outputPath))
     {
-        logger.LogWarning($"File already exists: {outputPath}");
-        return;
+        File.Delete(outputPath);
+        //logger.LogWarning($"File already exists: {outputPath}");
+        //return;
     }
 
     await File.WriteAllBytesAsync(outputPath, data);
