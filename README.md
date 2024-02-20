@@ -7,7 +7,7 @@ This application automatically downloads images from specific web pages, applies
 
 ## Requirements
 
-- .NET Core Runtime or SDK (Version 3.1 or higher).
+- .NET Core Runtime or SDK (Version 8 or higher).
 - An internet connection for downloading images.
 - Basic understanding of JSON configuration (for setting up `appsettings.json`).
 
