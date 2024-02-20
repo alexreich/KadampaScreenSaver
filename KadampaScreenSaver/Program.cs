@@ -12,28 +12,54 @@ using System.Drawing.Imaging;
 using System.Linq;
 using static System.Net.Mime.MediaTypeNames;
 using System.Net;
-
-
-//
-//TaskDefinition td = t.Definition;
-//t.Definition.Triggers.First().StartBoundary = today.AddDays(day);
-
-//Console.WriteLine(t.Definition.Triggers.First().StartBoundary);
-//day++;
-//td.Principal.RunLevel = TaskRunLevel.Highest;
-//td.Principal.LogonType = TaskLogonType.InteractiveToken;
-//td.Settings.MultipleInstances = TaskInstancesPolicy.IgnoreNew;
-////td.Settings.RunOnlyIfLoggedOn = true;
-//TaskService.Instance.RootFolder.RegisterTaskDefinition(t.Name, t.Definition, TaskCreation.Update, ConfigurationManager.AppSettings["username"], ConfigurationManager.AppSettings["password"], TaskLogonType.InteractiveToken);
-
-//todo - fix bug where page title updates and overwrites wrong pict (solution - download again)
-
+using Microsoft.Win32.TaskScheduler;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using TaskServiceTask = Microsoft.Win32.TaskScheduler.Task;
+using Task = System.Threading.Tasks.Task;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
 IConfigurationRoot configuration = new ConfigurationBuilder()
-.AddJsonFile("appsettings.json", true, true)
-.Build();
+    .AddJsonFile("appsettings.json", true, true)
+    .Build();
+
+
+if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    if (configuration.GetValue<string>("Task Scheduler:StartTime") != null)
+    {
+        using (TaskService ts = new TaskService())
+        {
+            bool found = false;
+            foreach (TaskServiceTask task in ts.RootFolder.Tasks)
+            {
+                if (task.Name == System.AppDomain.CurrentDomain.FriendlyName)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                TaskDefinition td = ts.NewTask();
+                td.RegistrationInfo.Author = "kadampa@alexreich.com";
+                td.RegistrationInfo.Description = "Kadampa News Service for KadampaScreenSaver";
+                td.Actions.Add(new ExecAction(Process.GetCurrentProcess().MainModule.FileName));
+
+                DailyTrigger trigger = new DailyTrigger
+                {
+                    StartBoundary = DateTime.Today.Add(TimeSpan.Parse(configuration.GetValue<string>("Task Scheduler:StartTime"))), // Set the start time to 5 AM today
+                    DaysInterval = 1 // Run every day
+                };
+
+                td.Triggers.Add(trigger);
+
+                ts.RootFolder.RegisterTaskDefinition(System.AppDomain.CurrentDomain.FriendlyName, td);
+
+                Console.WriteLine($"Task {System.AppDomain.CurrentDomain.FriendlyName} successfully registered!");
+            }
+        }
+    }
 
 int linkDepth = configuration.GetValue<int>("Policies:LinkDepth");
 int retentionDays = configuration.GetValue<int>("Policies:RetentionDays");
