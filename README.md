@@ -15,9 +15,17 @@ This application automatically downloads images from specific web pages, applies
 
 1. **Install .NET Core**: Make sure the .NET Core Runtime or SDK is installed on your system. You can download it from the [official Microsoft .NET website](https://dotnet.microsoft.com/download).
 
-2. **Download Application**: Obtain the application package from the provided source. It should include an executable file (e.g., `MyApp.exe`) and a configuration file (`appsettings.json`).
+2. **Download Application**: Obtain the application package from the provided source located under Releases on the right. It should include an executable file (e.g., `KadampaScreenSaver.exe`) and a configuration file (`appsettings.json`).
 
 3. **Extract Files**: Extract the downloaded package to a folder on your computer.
+
+4. **Install** scheduled task by running application. Running a second time will launch it immediately.
+
+5. **Verify** Open Task Scheduler (Start Menu > Programs > Administrative Tools) - Verify Kadampa News is listed.
+
+6. **Screensaver** Change to Photos. Settings to Browse - under Photos / Kadampa Pbotos (or configured).
+
+7. **May Dharma Flourish**.
 
 ## Configuration
 
