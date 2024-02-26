@@ -17,6 +17,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using TaskServiceTask = Microsoft.Win32.TaskScheduler.Task;
 using Task = System.Threading.Tasks.Task;
+using System.Globalization;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
@@ -187,7 +188,16 @@ foreach (string pageUrl in pageUrls)
             //    System.Diagnostics.Debugger.Break();
 
             string fileName = Path.GetFileName(imageUrl);
-            fileName = (9999 - DateTime.Parse(publishedTime).Year).ToString("0000") + (12 - DateTime.Parse(publishedTime).Month).ToString("00") + (31 - DateTime.Parse(publishedTime).Day).ToString("00") + "_" + fileName;
+
+            DateTime futureDate = new DateTime(9999, 12, 31);
+            DateTime publishedDate = DateTime.ParseExact(publishedTime, "yyyy-MM-ddTHH:mmzzz", CultureInfo.InvariantCulture).ToUniversalTime(); ;
+            TimeSpan dateDifference = futureDate - publishedDate;
+            long reverseOrder = dateDifference.Days; // Unique for each day
+
+            string identifier = reverseOrder.ToString("0000000"); // Ensures padding
+            fileName = identifier + "_" + fileName; // Prepend to fileName
+
+
             //fileName = DateTime.Parse(publishedTime).ToString("yyyyMMdd_") + fileName;
             string savePath = Path.Combine(baseDirectory, fileName);
 
