@@ -72,8 +72,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KadampaScreenSaver-${{ env.VERSION }}.zip
-          path: KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip
-
+          path: KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.
+          
       - name: Create or update GitHub Release
         shell: pwsh
         run: |
@@ -82,7 +82,8 @@ jobs:
       
           if ($release -eq $releaseTag) {
             Write-Host "Release with tag $releaseTag already exists. Updating release..."
-            gh release edit $releaseTag --title "Release $releaseTag" --notes "Release notes for version $releaseTag" --add-assets "KadampaScreenSaver/KadampaScreenSaver-$releaseTag.zip"
+            gh release edit $releaseTag --title "Release $releaseTag" --notes "Release notes for version $releaseTag"
+            gh release upload $releaseTag "KadampaScreenSaver/KadampaScreenSaver-$releaseTag.zip" --clobber
           }
           else {
             Write-Host "Creating a new release with tag $releaseTag..."
