@@ -18,6 +18,7 @@ using System.Threading.Tasks;
 using TaskServiceTask = Microsoft.Win32.TaskScheduler.Task;
 using Task = System.Threading.Tasks.Task;
 using System.Globalization;
+using Microsoft.Playwright;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
@@ -96,7 +97,7 @@ using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
 
 logger = loggerFactory.CreateLogger<Program>();
 
-string webpageUrl = "https://kadampa.org/news";
+string webpageUrl = configuration.GetValue<string>("StartPage");
 Directory.CreateDirectory(baseDirectory);
 
 // Download the webpage
@@ -142,7 +143,7 @@ foreach (string pageUrl in pageUrls)
     var publishedTime = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty));
 
     // Now, using LINQ to get all Images
-    var imageNodes = doc.DocumentNode.SelectNodes("//*//img")
+    var imageNodes = doc.DocumentNode.SelectNodes("//*//img")?
         .Where(node =>
         !node.Attributes.Any(a => a.Value.Contains("pp-post-img")) &&
         (
@@ -154,6 +155,11 @@ foreach (string pageUrl in pageUrls)
         )
     .ToList();
 
+    if (imageNodes == null || imageNodes.Count == 0)
+    {
+        logger.LogWarning($"No images found on page: {pageUrl}");
+        continue;
+    }
 
     // filter out images with certain text in the URL
     var imageUrls = new List<string>();
@@ -190,7 +196,7 @@ foreach (string pageUrl in pageUrls)
             string fileName = Path.GetFileName(imageUrl);
 
             DateTime futureDate = new DateTime(9999, 12, 31);
-            DateTime publishedDate = DateTime.ParseExact(publishedTime, "yyyy-MM-ddTHH:mmzzz", CultureInfo.InvariantCulture).ToUniversalTime(); ;
+            DateTime publishedDate = DateTime.ParseExact(publishedTime, "yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture).ToUniversalTime();
             TimeSpan dateDifference = futureDate - publishedDate;
             long reverseOrder = dateDifference.Days; // Unique for each day
 
@@ -398,12 +404,60 @@ async Task DownloadFile(string url, string outputPath)
 
     await File.WriteAllBytesAsync(outputPath, data);
 }
+
 async Task<string> DownloadHtmlContentAsync(string url)
 {
-    using var httpClient = new HttpClient();
-    var response = await httpClient.GetStringAsync(url);
-    return response;
+    using var playwright = await Playwright.CreateAsync();
+
+    // Try launching local Chrome with stealth-like args
+    var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+    {
+        Channel = "chrome", // or "msedge"
+        Headless = true,
+        IgnoreDefaultArgs = new[] { "--enable-automation" },
+        Args = new[]
+        {
+            "--disable-blink-features=AutomationControlled"
+        }
+    });
+
+    // Create a context that spoofs typical browser properties
+    var context = await browser.NewContextAsync(new BrowserNewContextOptions
+    {
+        UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36",
+        ViewportSize = new ViewportSize { Width = 1920, Height = 1080 }
+        // you can also set deviceScaleFactor, locale, timezoneId, geolocation, etc.
+    });
+
+    // Hide 'webdriver' property
+    await context.AddInitScriptAsync(@"() => {
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+    }");
+
+    var page = await context.NewPageAsync();
+
+    await page.GotoAsync(url, new PageGotoOptions
+    {
+        WaitUntil = WaitUntilState.DOMContentLoaded,
+        Timeout = 60000
+    });
+
+    // Wait for some element to confirm the page loaded
+    await page.WaitForSelectorAsync("body", new PageWaitForSelectorOptions { Timeout = 10000 });
+
+    // Or wait for a specific item that indicates content is fully loaded
+    // await page.WaitForSelectorAsync("a[href^='https://kadampa.org/2025']");
+
+    await page.WaitForTimeoutAsync(2000);
+
+    string content = await page.ContentAsync();
+    await browser.CloseAsync();
+    return content;
 }
+
 
 
 
