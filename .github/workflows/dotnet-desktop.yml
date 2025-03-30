@@ -48,12 +48,12 @@ jobs:
           [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
 
       - name: Extract version from csproj
+        shell: pwsh
         run: |
           $csprojPath = Join-Path -Path $env:Project_Directory -ChildPath "KadampaScreenSaver.csproj"
           $csproj = [xml](Get-Content $csprojPath)
           $version = $csproj.Project.PropertyGroup.Version
           echo "VERSION=$version" | Out-File -Append -FilePath $env:GITHUB_ENV
-        shell: pwsh
 
       - name: Build the application
         run: msbuild $env:Solution_Name /p:Configuration=$env:Configuration /p:Platform="${{ matrix.platform }}"
@@ -69,12 +69,13 @@ jobs:
         run: Compress-Archive -Path "KadampaScreenSaver/bin/Release/net8.0/publish/*" -DestinationPath "KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip"
   
       - name: Upload unpackaged app
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: KadampaScreenSaver-${{ env.VERSION }}.zip
           path: KadampaScreenSaver/KadampaScreenSaver-${{ env.VERSION }}.zip
 
       - name: Create GitHub Release
+        shell: pwsh
         run: |
           gh release create $env:VERSION `
             --title "Release $env:VERSION" `
@@ -83,4 +84,3 @@ jobs:
             --target main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
