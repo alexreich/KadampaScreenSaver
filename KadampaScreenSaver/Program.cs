@@ -135,7 +135,7 @@ foreach (string pageUrl in pageUrls)
         break;
     }
 
-    var imageUrls = await GetImageUrlsWithPlaywright(pageUrl);
+    var (innerHtml, imageUrls) = await LoadContentAndImagesAsync(pageUrl);
 
     if (imageUrls == null || imageUrls.Count == 0)
     {
@@ -157,7 +157,8 @@ foreach (string pageUrl in pageUrls)
             imageUrlLower.Contains("book") ||
             imageUrlLower.Contains("gen-") ||
             imageUrlLower.Contains("1024x") ||
-            imageUrlLower.Contains("adobestock")
+            imageUrlLower.Contains("adobestock") ||
+            imageUrlLower.Contains("heic_")
         )
         {
             continue;
@@ -165,9 +166,9 @@ foreach (string pageUrl in pageUrls)
 
         filteredImageUrls.Add(imageUrl);
     }
-    var html = await GetPageHtmlWithPlaywright("https://kadampa.org/2025/04/blessed-events-in-southamerica");
+    var html = await LoadContentAndImagesAsync(pageUrl);
     var doc = new HtmlDocument();
-    doc.LoadHtml(html);
+    doc.LoadHtml(html.htmlContent);
 
     var ogDescription = doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty);
     var title = doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty);
@@ -286,52 +287,56 @@ foreach (string file in files)
         }
     }
 }
-async Task<string> GetPageHtmlWithPlaywright(string url)
+async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsync(string url)
 {
     using var playwright = await Playwright.CreateAsync();
-    var browser = await playwright.Chromium.LaunchAsync(new() { Headless = false });
-    var page = await browser.NewPageAsync();
-    await page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-
-    string html = await page.ContentAsync();
-    await browser.CloseAsync();
-    return html;
-}
-async Task<List<string>> GetImageUrlsWithPlaywright(string url)
-{
-    using var playwright = await Playwright.CreateAsync();
-
     var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
     {
-        Headless = false
+        Channel = "msedge",
+        Headless = false,
+        IgnoreDefaultArgs = new[] { "--enable-automation" },
+        Args = new[] { "--disable-blink-features=AutomationControlled" }
     });
 
-    var context = await browser.NewContextAsync();
-    var page = await context.NewPageAsync();
+    var context = await browser.NewContextAsync(new BrowserNewContextOptions
+    {
+        UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36",
+        ViewportSize = new ViewportSize { Width = 1920, Height = 1080 }
+    });
 
+    await context.AddInitScriptAsync(@"
+        () => {
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        }
+    ");
+
+    var page = await context.NewPageAsync();
     await page.GotoAsync(url, new PageGotoOptions
     {
         WaitUntil = WaitUntilState.NetworkIdle,
         Timeout = 60000
     });
 
-    // Wait for images to load – optional but useful
+    await page.WaitForSelectorAsync("body", new PageWaitForSelectorOptions { Timeout = 10000 });
+    await page.WaitForTimeoutAsync(2000);
+
+    string content = await page.ContentAsync();
+
+    // Optionally wait for images
     await page.WaitForSelectorAsync("img", new PageWaitForSelectorOptions
     {
         Timeout = 10000,
         State = WaitForSelectorState.Attached
     });
-
-    // Now extract all image URLs
-    var imageUrls = await page.EvaluateAsync<string[]>(
-        @"Array.from(document.querySelectorAll('img')).map(img => img.src)"
+    var images = await page.EvaluateAsync<string[]>(
+        "Array.from(document.querySelectorAll('img')).map(img => img.src)"
     );
 
     await browser.CloseAsync();
-    return imageUrls
-        .Where(src => !string.IsNullOrWhiteSpace(src))
-        .Distinct()
-        .ToList();
+    return (content, images.Where(src => !string.IsNullOrWhiteSpace(src)).Distinct().ToList());
 }
 
 Color FindContrastingColor(Color baseColor, List<Color> brandColors)
@@ -356,26 +361,34 @@ Color FindContrastingColor(Color baseColor, List<Color> brandColors)
 
     return contrastingColor;
 }
-Color CalculateAverageColor(Bitmap bmp, int areaHeightPercent)
+Color CalculateAverageColor(Bitmap bmp, int startYPercent, int endYPercent)
 {
-    int totalR = 0, totalG = 0, totalB = 0;
-    int startY = 0;
-    int endY = bmp.Height * areaHeightPercent / 100;
+    int height = bmp.Height;
+    int startY = height * startYPercent / 100;
+    int endY = height * endYPercent / 100;
+
+    long totalR = 0, totalG = 0, totalB = 0;
+    long pixelCount = 0;
 
     for (int y = startY; y < endY; y++)
     {
         for (int x = 0; x < bmp.Width; x++)
         {
-            Color pixel = bmp.GetPixel(x, y);
-            totalR += pixel.R;
-            totalG += pixel.G;
-            totalB += pixel.B;
+            Color c = bmp.GetPixel(x, y);
+            totalR += c.R;
+            totalG += c.G;
+            totalB += c.B;
+            pixelCount++;
         }
     }
 
-    int totalPixels = bmp.Width * (endY - startY);
-    return Color.FromArgb(totalR / totalPixels, totalG / totalPixels, totalB / totalPixels);
+    int avgR = (int)(totalR / pixelCount);
+    int avgG = (int)(totalG / pixelCount);
+    int avgB = (int)(totalB / pixelCount);
+
+    return Color.FromArgb(avgR, avgG, avgB);
 }
+
 
 
 async Task DownloadFile(string url, string outputPath)
@@ -447,40 +460,119 @@ async Task<string> DownloadHtmlContentAsync(string url)
     return content;
 }
 
+// Convert 0–255 sRGB => linear space => L
+double ToRelativeLuminance(Color c)
+{
+    // sRGB => linear
+    double Rsrgb = c.R / 255.0;
+    double Gsrgb = c.G / 255.0;
+    double Bsrgb = c.B / 255.0;
 
+    double R = (Rsrgb <= 0.03928) ? (Rsrgb / 12.92) : Math.Pow((Rsrgb + 0.055) / 1.055, 2.4);
+    double G = (Gsrgb <= 0.03928) ? (Gsrgb / 12.92) : Math.Pow((Gsrgb + 0.055) / 1.055, 2.4);
+    double B = (Bsrgb <= 0.03928) ? (Bsrgb / 12.92) : Math.Pow((Bsrgb + 0.055) / 1.055, 2.4);
 
+    // Per W3C formula: L = 0.2126*R + 0.7152*G + 0.0722*B
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+Color FindBestTextColor(Color background, List<Color> brandColors)
+{
+    // First, find which brand color yields the highest ratio
+    Color bestBrand = brandColors[0];
+    double bestRatio = 0.0;
+
+    foreach (var brandColor in brandColors)
+    {
+        double ratio = GetContrastRatio(brandColor, background);
+        if (ratio > bestRatio)
+        {
+            bestRatio = ratio;
+            bestBrand = brandColor;
+        }
+    }
+
+    // If that brand color is still too low, check black/white
+    // (You can choose your own threshold, e.g. 4.5 or 3.0.)
+    const double minReadableRatio = 3.0;
+
+    if (bestRatio >= minReadableRatio)
+    {
+        return bestBrand; // good enough
+    }
+
+    // Try black & white
+    double blackRatio = GetContrastRatio(Color.Black, background);
+    double whiteRatio = GetContrastRatio(Color.White, background);
+
+    if (blackRatio > whiteRatio)
+    {
+        if (blackRatio >= minReadableRatio) return Color.Black;
+        return bestBrand; // fallback to brand color if black is also too low
+    }
+    else
+    {
+        if (whiteRatio >= minReadableRatio) return Color.White;
+        return bestBrand; // fallback
+    }
+}
+
+// ratio = (L1 + 0.05) / (L2 + 0.05), where L1 >= L2
+double GetContrastRatio(Color foreground, Color background)
+{
+    double fLum = ToRelativeLuminance(foreground);
+    double bLum = ToRelativeLuminance(background);
+
+    double lighter = Math.Max(fLum, bLum);
+    double darker = Math.Min(fLum, bLum);
+
+    return (lighter + 0.05) / (darker + 0.05);
+}
 
 // General function to handle text drawing
-void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text, string fontName, List<Color> brandColors, bool isHeader)
+void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text,
+                     string fontName, List<Color> brandColors, bool isHeader)
 {
-    float targetTextWidth = bitmap.Width * 0.80f; // Adjusted for more margin
-    int initialFontSize = isHeader ? 10 : 8; // Starting font size
-    int maxFontSize = 60; // More reasonable maximum
+    // 1) Determine bounding region to sample
+    //    top 10% for the header, bottom 10% for the footer
+    int startPercent = isHeader ? 0   : 90;
+    int endPercent   = isHeader ? 10  : 100;
+
+    Color backgroundAvg = CalculateAverageColor(bitmap, startPercent, endPercent);
+    Color textColor = FindBestTextColor(backgroundAvg, brandColors);
+
+    // 2) Find a font size that fits
+    float targetTextWidth = bitmap.Width * 0.80f;
+    int initialFontSize = isHeader ? 16 : 12; // pick a bit bigger default
+    int maxFontSize = 72;
+
     SizeF textSize;
-    System.Drawing.Font arialFont;
-
-    Color avgColor = isHeader ? CalculateAverageColor(bitmap, 20) : CalculateAverageColor(bitmap, 80);
-    Color textColor = FindContrastingColor(avgColor, brandColors);
-
     int fontSize = initialFontSize;
-    do
-    {
-        arialFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel);
-        textSize = graphics.MeasureString(text, arialFont, (int)targetTextWidth);
-        fontSize++;
-    } while (textSize.Width < targetTextWidth && fontSize <= maxFontSize);
 
-    fontSize--;
-    if (fontSize > 0)
+    // measure until it no longer fits
+    using (var testFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel))
     {
-        using (arialFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel))
+        do
         {
-            textSize = graphics.MeasureString(text, arialFont, (int)targetTextWidth);
-            float x = (bitmap.Width - textSize.Width) / 2;
-            float y = isHeader ? Math.Max(10, (bitmap.Height * 0.05f)) : (bitmap.Height - textSize.Height - bitmap.Height * 0.02f); // Adjusted Y position for footer
-
-            graphics.DrawString(text, arialFont, new SolidBrush(textColor), new RectangleF(x, y, targetTextWidth, textSize.Height));
+            fontSize++;
+            using var biggerFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel);
+            textSize = graphics.MeasureString(text, biggerFont, (int)targetTextWidth);
         }
+        while (textSize.Width < targetTextWidth && fontSize < maxFontSize);
+    }
+    fontSize = Math.Min(fontSize, maxFontSize);
+
+    // 3) Draw final text
+    using (var finalFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel))
+    {
+        textSize = graphics.MeasureString(text, finalFont, (int)targetTextWidth);
+
+        float x = (bitmap.Width - textSize.Width) / 2f;
+        float y = isHeader
+            ? bitmap.Height * 0.02f
+            : (bitmap.Height - textSize.Height - (bitmap.Height * 0.02f));
+
+        using var brush = new SolidBrush(textColor);
+        graphics.DrawString(text, finalFont, brush, new RectangleF(x, y, targetTextWidth, textSize.Height));
     }
 }
 
