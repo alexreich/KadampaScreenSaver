@@ -135,37 +135,18 @@ foreach (string pageUrl in pageUrls)
         break;
     }
 
-    var web = new HtmlWeb();
-    var doc = web.Load(pageUrl);
+    var imageUrls = await GetImageUrlsWithPlaywright(pageUrl);
 
-    var ogDescription = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty));
-    var title = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty));
-    var publishedTime = WebUtility.HtmlDecode(doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty));
-
-    // Now, using LINQ to get all Images
-    var imageNodes = doc.DocumentNode.SelectNodes("//*//img")?
-        .Where(node =>
-        !node.Attributes.Any(a => a.Value.Contains("pp-post-img")) &&
-        (
-        node.Attributes.Any(w => w.Name == "class" && w.Value.Contains("thumbnail")
-        || w.Value.Contains("gallery-img")
-        || w.Value.Contains("f1-photo-content")
-        || w.Value.Contains("fl-photo-img"))
-        )
-        )
-    .ToList();
-
-    if (imageNodes == null || imageNodes.Count == 0)
+    if (imageUrls == null || imageUrls.Count == 0)
     {
         logger.LogWarning($"No images found on page: {pageUrl}");
         continue;
     }
 
     // filter out images with certain text in the URL
-    var imageUrls = new List<string>();
-    foreach (var node in imageNodes)
+    var filteredImageUrls = new List<string>();
+    foreach (var imageUrl in imageUrls)
     {
-        string imageUrl = node.Attributes["src"].Value;
         string imageUrlLower = imageUrl.ToLower();
 
         if (
@@ -182,34 +163,35 @@ foreach (string pageUrl in pageUrls)
             continue;
         }
 
-        imageUrls.Add(imageUrl);
+        filteredImageUrls.Add(imageUrl);
     }
+    var html = await GetPageHtmlWithPlaywright("https://kadampa.org/2025/04/blessed-events-in-southamerica");
+    var doc = new HtmlDocument();
+    doc.LoadHtml(html);
 
-    Parallel.ForEach(imageUrls, imageUrl =>
+    var ogDescription = doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty);
+    var title = doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty);
+    var publishedTime = doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty);
+
+    Parallel.ForEach(filteredImageUrls, imageUrl =>
     {
-
         try
         {
-            //if (imageUrl.Contains("NKT-IKBU-New_Kadampa-2024-KMC-Fort-Collins-IMG_20231220_180758927.jpg"))
-            //    System.Diagnostics.Debugger.Break();
-
             string fileName = Path.GetFileName(imageUrl);
 
             DateTime futureDate = new DateTime(9999, 12, 31);
-            DateTime publishedDate = DateTime.ParseExact(publishedTime, "yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture).ToUniversalTime();
+            DateTime publishedDate = DateTime.UtcNow; // Use current date as published date
             TimeSpan dateDifference = futureDate - publishedDate;
             long reverseOrder = dateDifference.Days; // Unique for each day
 
             string identifier = reverseOrder.ToString("0000000"); // Ensures padding
             fileName = identifier + "_" + fileName; // Prepend to fileName
 
-
-            //fileName = DateTime.Parse(publishedTime).ToString("yyyyMMdd_") + fileName;
             string savePath = Path.Combine(baseDirectory, fileName);
 
             // Download the image
             DownloadFile(imageUrl, savePath).Wait();
-
+            
             if (!File.Exists(savePath)) { return; }
 
             // Check image dimensions
@@ -249,9 +231,8 @@ foreach (string pageUrl in pageUrls)
                             if (configuration.GetValue<bool>("PhotoText:DateInclude"))
                             {
                                 textToAdd += configuration.GetValue<string>("PhotoText:DatePrefix");
-                                textToAdd += $"{DateTime.Parse(publishedTime).ToString(configuration.GetValue<string>("PhotoText:DateFormat"))}";
+                                textToAdd += $"{DateTime.UtcNow.ToString(configuration.GetValue<string>("PhotoText:DateFormat"))}";
                             }
-                            //textToAdd += $"\n{ogDescription}";
                             if (configuration.GetValue<bool>("PhotoText:ImageFileName"))
                             {
                                 textToAdd += $"\n{imageNameWithoutExtension}";
@@ -265,12 +246,10 @@ foreach (string pageUrl in pageUrls)
 
                     newBitmap.Save(savePath); // Save the image file
                     newBitmap.Dispose();
-                    File.SetCreationTime(savePath, DateTime.Parse(publishedTime));
-                    File.SetLastWriteTime(savePath, DateTime.Parse(publishedTime));
+                    File.SetCreationTime(savePath, DateTime.UtcNow);
+                    File.SetLastWriteTime(savePath, DateTime.UtcNow);
                 }
-
             }
-
         }
         catch (Exception ex)
         {
@@ -278,44 +257,6 @@ foreach (string pageUrl in pageUrls)
             logger.LogError($"Error downloading image: {imageUrl}. Error: {ex.Message}");
         }
     });
-
-    //removing as youtube-dl is no longer maintained / may reviist
-    //// Download video
-    //try
-    //{
-    //    // Extract the part of the URL after the last slash
-    //    string fileName = pageUrl.Substring(pageUrl.LastIndexOf("/") + 1);
-
-    //    // Replace any characters that are not allowed in filenames
-    //    fileName = fileName.Replace('[', '-').Replace('\\', '-').Replace('/', '-')
-    //        .Replace(':', '-').Replace('*', '-').Replace('?', '-')
-    //        .Replace('"', '-').Replace('<', '-').Replace('>', '-')
-    //        .Replace('|', '-');
-
-    //    // Add the directory and extension to the filename
-    //    string outputPath = Path.Combine(baseDirectory, $"{fileName}.mp4");
-
-    //    // Prepare the processStartInfo
-    //    var processStartInfo = new ProcessStartInfo
-    //    {
-    //        FileName = "youtube-dl",
-    //        Arguments = $"-f mp4 -o \"{outputPath}\" {pageUrl}",
-    //        RedirectStandardOutput = true,
-    //        RedirectStandardError = true,
-    //        UseShellExecute = false,
-    //        CreateNoWindow = true,
-    //    };
-
-    //    // Start the process
-    //    var process = Process.Start(processStartInfo);
-
-    //    // Wait for the process to finish
-    //    process.WaitForExit();
-    //}
-    //catch (Exception ex)
-    //{
-    //    logger.LogError($"Error downloading video: {ex.Message}");
-    //}
 
     pageCount++;
 }
@@ -345,6 +286,54 @@ foreach (string file in files)
         }
     }
 }
+async Task<string> GetPageHtmlWithPlaywright(string url)
+{
+    using var playwright = await Playwright.CreateAsync();
+    var browser = await playwright.Chromium.LaunchAsync(new() { Headless = false });
+    var page = await browser.NewPageAsync();
+    await page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+    string html = await page.ContentAsync();
+    await browser.CloseAsync();
+    return html;
+}
+async Task<List<string>> GetImageUrlsWithPlaywright(string url)
+{
+    using var playwright = await Playwright.CreateAsync();
+
+    var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+    {
+        Headless = false
+    });
+
+    var context = await browser.NewContextAsync();
+    var page = await context.NewPageAsync();
+
+    await page.GotoAsync(url, new PageGotoOptions
+    {
+        WaitUntil = WaitUntilState.NetworkIdle,
+        Timeout = 60000
+    });
+
+    // Wait for images to load – optional but useful
+    await page.WaitForSelectorAsync("img", new PageWaitForSelectorOptions
+    {
+        Timeout = 10000,
+        State = WaitForSelectorState.Attached
+    });
+
+    // Now extract all image URLs
+    var imageUrls = await page.EvaluateAsync<string[]>(
+        @"Array.from(document.querySelectorAll('img')).map(img => img.src)"
+    );
+
+    await browser.CloseAsync();
+    return imageUrls
+        .Where(src => !string.IsNullOrWhiteSpace(src))
+        .Distinct()
+        .ToList();
+}
+
 Color FindContrastingColor(Color baseColor, List<Color> brandColors)
 {
     Color contrastingColor = brandColors[0];
@@ -412,8 +401,8 @@ async Task<string> DownloadHtmlContentAsync(string url)
     // Try launching local Chrome with stealth-like args
     var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
     {
-        Channel = "chrome", // or "msedge"
-        Headless = true,
+        Channel = "msedge", // or "msedge"
+        Headless = false,
         IgnoreDefaultArgs = new[] { "--enable-automation" },
         Args = new[]
         {
