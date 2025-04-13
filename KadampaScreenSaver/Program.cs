@@ -19,6 +19,7 @@ using TaskServiceTask = Microsoft.Win32.TaskScheduler.Task;
 using Task = System.Threading.Tasks.Task;
 using System.Globalization;
 using Microsoft.Playwright;
+using KadampaScreenSaver;
 
 HttpClient client = new HttpClient();
 ILogger<Program> logger = null;
@@ -100,6 +101,13 @@ logger = loggerFactory.CreateLogger<Program>();
 string webpageUrl = configuration.GetValue<string>("StartPage");
 Directory.CreateDirectory(baseDirectory);
 
+// Create UrlLogger instance (store log file in baseDirectory for convenience)
+string urlLogFile = Path.Combine(baseDirectory, "VisitedUrls.log");
+UrlLogger urlLogger = new UrlLogger(urlLogFile);
+
+// Cleanup old URL logs
+urlLogger.Cleanup(30);
+
 // Download the webpage
 logger.LogInformation("Starting download of webpage");
 
@@ -108,6 +116,7 @@ string htmlContent = await DownloadHtmlContentAsync(webpageUrl);
 var pageUrls = Regex.Matches(htmlContent, "<a.*?href=[\"'](.*?)[\"']")
     .Cast<Match>()
     .Select(match => match.Groups[1].Value)
+    .Where(u => !urlLogger.AlreadyVisited(u)) // skip visited
     .ToList();
 
 // Check if any page URLs were found
@@ -134,6 +143,9 @@ foreach (string pageUrl in pageUrls)
     {
         break;
     }
+
+    // Record that we've visited this URL
+    urlLogger.LogUrl(pageUrl);
 
     var (innerHtml, imageUrls) = await LoadContentAndImagesAsync(pageUrl);
 
@@ -171,7 +183,7 @@ foreach (string pageUrl in pageUrls)
     doc.LoadHtml(html.htmlContent);
 
     var ogDescription = doc.DocumentNode.SelectSingleNode("//meta[@property='og:description']")?.GetAttributeValue("content", string.Empty);
-    var title = doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty);
+    var title = CleanText(doc.DocumentNode.SelectSingleNode("//meta[@property='og:title']")?.GetAttributeValue("content", string.Empty));
     var publishedTime = doc.DocumentNode.SelectSingleNode("//meta[@property='article:published_time']")?.GetAttributeValue("content", string.Empty);
 
     Parallel.ForEach(filteredImageUrls, imageUrl =>
@@ -287,6 +299,10 @@ foreach (string file in files)
         }
     }
 }
+
+// At the very end, cleanup again (optional)
+urlLogger.Cleanup(30);
+
 async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsync(string url)
 {
     using var playwright = await Playwright.CreateAsync();
@@ -574,5 +590,20 @@ void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text,
         using var brush = new SolidBrush(textColor);
         graphics.DrawString(text, finalFont, brush, new RectangleF(x, y, targetTextWidth, textSize.Height));
     }
+}
+
+// Add the CleanText helper method
+static string CleanText(string input)
+{
+    if (string.IsNullOrEmpty(input))
+        return string.Empty;
+
+    // Decode HTML entities
+    string deEntitized = HtmlEntity.DeEntitize(input);
+
+    // Remove any remaining HTML tags
+    var doc = new HtmlDocument();
+    doc.LoadHtml(deEntitized);
+    return doc.DocumentNode.InnerText;
 }
 
