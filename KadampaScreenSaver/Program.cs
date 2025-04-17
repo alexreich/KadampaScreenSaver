@@ -115,8 +115,17 @@ logger.LogInformation("Starting download of webpage");
 string htmlContent = await DownloadHtmlContentAsync(webpageUrl);
 var pageUrls = Regex.Matches(htmlContent, "<a.*?href=[\"'](.*?)[\"']")
     .Cast<Match>()
-    .Select(match => match.Groups[1].Value)
-    .Where(u => !urlLogger.AlreadyVisited(u)) // skip visited
+    .Select(m => m.Groups[1].Value)
+    // resolve relative → absolute
+    .Select(href => {
+        var u = new Uri(href, UriKind.RelativeOrAbsolute);
+        return u.IsAbsoluteUri
+            ? u
+            : new Uri(new Uri(webpageUrl), href);
+    })
+    // skip anything we already logged
+    .Where(u => !urlLogger.AlreadyVisited(u.AbsoluteUri))
+    .Select(u => u.AbsoluteUri)
     .ToList();
 
 // Check if any page URLs were found
@@ -204,7 +213,7 @@ foreach (string pageUrl in pageUrls)
 
             // Download the image
             DownloadFile(imageUrl, savePath).Wait();
-            
+
             if (!File.Exists(savePath)) { return; }
 
             // Check image dimensions
@@ -285,7 +294,7 @@ foreach (string file in files)
 {
     FileInfo fileInfo = new FileInfo(file);
     if ((currentDate - fileInfo.LastWriteTime).TotalDays > retentionDays ||
-        !new[] { ".jpg", ".jpeg", ".gif", ".bmp", ".mp4" }.Contains(fileInfo.Extension))
+        !new[] { ".jpg", ".jpeg", ".gif", ".bmp", ".mp4", ".log" }.Contains(fileInfo.Extension))
     {
         // Delete old files
         try
@@ -309,7 +318,7 @@ async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsy
     var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
     {
         Channel = "msedge",
-        Headless = false,
+        Headless = true,
         IgnoreDefaultArgs = new[] { "--enable-automation" },
         Args = new[] { "--disable-blink-features=AutomationControlled" }
     });
@@ -431,7 +440,7 @@ async Task<string> DownloadHtmlContentAsync(string url)
     var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
     {
         Channel = "msedge", // or "msedge"
-        Headless = false,
+        Headless = true,
         IgnoreDefaultArgs = new[] { "--enable-automation" },
         Args = new[]
         {
@@ -548,49 +557,60 @@ double GetContrastRatio(Color foreground, Color background)
 void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text,
                      string fontName, List<Color> brandColors, bool isHeader)
 {
-    // 1) Determine bounding region to sample
-    //    top 10% for the header, bottom 10% for the footer
-    int startPercent = isHeader ? 0   : 90;
-    int endPercent   = isHeader ? 10  : 100;
-
+    // 1) Sample the background, pick a good foreground color
+    int startPercent = isHeader ? 0 : 90;
+    int endPercent = isHeader ? 10 : 100;
     Color backgroundAvg = CalculateAverageColor(bitmap, startPercent, endPercent);
     Color textColor = FindBestTextColor(backgroundAvg, brandColors);
 
-    // 2) Find a font size that fits
-    float targetTextWidth = bitmap.Width * 0.80f;
-    int initialFontSize = isHeader ? 16 : 12; // pick a bit bigger default
-    int maxFontSize = 72;
+    // 2) Figure out our layout box
+    float boxTop = bitmap.Height * startPercent / 100f;
+    float boxHeight = bitmap.Height * (endPercent - startPercent) / 100f;
+    float boxWidth = bitmap.Width * 0.80f;          // 80% of the image width
+    float boxLeft = (bitmap.Width - boxWidth) / 2; // centered
 
-    SizeF textSize;
-    int fontSize = initialFontSize;
+    // 3) Find the largest font size that fits both width and height
+    int initialSize = isHeader ? 16 : 12;
+    int bestSize = initialSize;
+    const int maxSize = 72;
 
-    // measure until it no longer fits
-    using (var testFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel))
+    for (int size = initialSize; size <= maxSize; size++)
     {
-        do
+        using var testFont = new System.Drawing.Font(fontName, size, GraphicsUnit.Pixel);
+
+        // measure with wrapping at boxWidth
+        SizeF measured = graphics.MeasureString(
+            text,
+            testFont,
+            (int)boxWidth,
+            StringFormat.GenericDefault
+        );
+
+        if (measured.Width > boxWidth ||
+            measured.Height > boxHeight)
         {
-            fontSize++;
-            using var biggerFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel);
-            textSize = graphics.MeasureString(text, biggerFont, (int)targetTextWidth);
+            // we’ve exceeded the box in either dimension,
+            // so stick with the last size that fit
+            break;
         }
-        while (textSize.Width < targetTextWidth && fontSize < maxFontSize);
+
+        bestSize = size;
     }
-    fontSize = Math.Min(fontSize, maxFontSize);
 
-    // 3) Draw final text
-    using (var finalFont = new System.Drawing.Font(fontName, fontSize, GraphicsUnit.Pixel))
-    {
-        textSize = graphics.MeasureString(text, finalFont, (int)targetTextWidth);
+    // 4) Draw it for real
+    using var finalFont = new System.Drawing.Font(fontName, bestSize, GraphicsUnit.Pixel);
+    var sf = StringFormat.GenericDefault;
+    var layout = new RectangleF(boxLeft,
+                                isHeader
+                                  ? boxTop + 5              // a little padding
+                                  : boxTop + (boxHeight - graphics.MeasureString(text, finalFont, (int)boxWidth).Height) - 5,
+                                boxWidth,
+                                boxHeight);
 
-        float x = (bitmap.Width - textSize.Width) / 2f;
-        float y = isHeader
-            ? bitmap.Height * 0.02f
-            : (bitmap.Height - textSize.Height - (bitmap.Height * 0.02f));
-
-        using var brush = new SolidBrush(textColor);
-        graphics.DrawString(text, finalFont, brush, new RectangleF(x, y, targetTextWidth, textSize.Height));
-    }
+    using var brush = new SolidBrush(textColor);
+    graphics.DrawString(text, finalFont, brush, layout, sf);
 }
+
 
 // Add the CleanText helper method
 static string CleanText(string input)
@@ -605,5 +625,101 @@ static string CleanText(string input)
     var doc = new HtmlDocument();
     doc.LoadHtml(deEntitized);
     return doc.DocumentNode.InnerText;
+}
+public class UrlLogger
+{
+    private readonly string _filePath;
+    private readonly HashSet<string> _visited;
+
+    public UrlLogger(string filePath)
+    {
+        _filePath = filePath;
+        if (!File.Exists(_filePath))
+            File.WriteAllText(_filePath, "");
+
+        _visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Load & normalize every line we wrote previously
+        foreach (var line in File.ReadAllLines(_filePath))
+        {
+            var parts = line.Split('\t', 2);
+            if (parts.Length != 2) continue;
+
+            // parts[1] is the URL we logged (already normalized when written)
+            var norm = parts[1].Trim();
+            _visited.Add(norm);
+        }
+    }
+
+    /// <summary>
+    /// True if we've already visited this URL (in normalized form).
+    /// </summary>
+    public bool AlreadyVisited(string url)
+        => _visited.Contains(NormalizeUrl(url));
+
+    /// <summary>
+    /// Adds a timestamped entry of the normalized URL, if not already there.
+    /// </summary>
+    public void LogUrl(string url)
+    {
+        var norm = NormalizeUrl(url);
+        if (_visited.Add(norm))
+        {
+            var timestamp = DateTime.UtcNow.ToString("O"); // ISO‑8601
+            File.AppendAllText(_filePath, $"{timestamp}\t{norm}{Environment.NewLine}");
+        }
+    }
+
+    /// <summary>
+    /// Drops any logged URLs older than retentionDays, both on disk and in memory.
+    /// </summary>
+    public void Cleanup(int retentionDays)
+    {
+        if (!File.Exists(_filePath)) return;
+        var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+
+        var keptLines = new List<string>();
+        foreach (var line in File.ReadAllLines(_filePath))
+        {
+            var parts = line.Split('\t', 2);
+            if (parts.Length != 2) continue;
+            if (DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out var time)
+                && time >= cutoff)
+            {
+                keptLines.Add(line);
+            }
+        }
+
+        // Rewrite only the kept entries
+        File.WriteAllLines(_filePath, keptLines);
+
+        // Refresh the in‑memory set
+        _visited.Clear();
+        foreach (var line in keptLines)
+        {
+            var urlPart = line.Split('\t', 2)[1].Trim();
+            _visited.Add(urlPart);
+        }
+    }
+
+    /// <summary>
+    /// Normalizes a URL by lower‑casing, trimming trailing slash on the path,
+    /// and preserving the query string.
+    /// </summary>
+    private string NormalizeUrl(string raw)
+    {
+        try
+        {
+            var uri = new Uri(raw);
+            var path = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+            var query = uri.Query; // e.g. "?page=2" or ""
+            return (path + query).ToLowerInvariant();
+        }
+        catch
+        {
+            // If it's not a valid URI, just trim+lowercase it
+            return raw.Trim().ToLowerInvariant();
+        }
+    }
 }
 
