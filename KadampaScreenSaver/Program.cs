@@ -186,6 +186,9 @@ foreach (string pageUrl in pageUrls)
         }
 
         filteredImageUrls.Add(imageUrl);
+
+        if (imageUrl.Contains("Arizona-Shrine") || imageUrl.Contains("Kadam-") || imageUrl.Contains("International-Project"))
+            System.Diagnostics.Debugger.Break();
     }
     var html = await LoadContentAndImagesAsync(pageUrl);
     var doc = new HtmlDocument();
@@ -350,15 +353,47 @@ async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsy
 
     string content = await page.ContentAsync();
 
-    // Optionally wait for images
-    await page.WaitForSelectorAsync("img", new PageWaitForSelectorOptions
+    // Wait for the actual post content (avoids grabbing images from the hamburger/mega-menu)
+    await page.WaitForSelectorAsync("article", new PageWaitForSelectorOptions
     {
         Timeout = 10000,
         State = WaitForSelectorState.Attached
     });
-    var images = await page.EvaluateAsync<string[]>(
-        "Array.from(document.querySelectorAll('img')).map(img => img.src)"
-    );
+
+    var images = await page.EvaluateAsync<string[]>(@"
+        () => {
+            // Prefer the real post body; fall back to the article; last resort: document body.
+            const root =
+                document.querySelector('main article .entry-content') ||
+                document.querySelector('article .entry-content') ||
+                document.querySelector('main article') ||
+                document.querySelector('article') ||
+                document.body;
+
+            const pickSrc = (img) =>
+                img.currentSrc ||
+                img.src ||
+                img.getAttribute('data-src') ||
+                img.getAttribute('data-lazy-src') ||
+                img.getAttribute('data-original') ||
+                '';
+
+            const isInNavOrMenu = (img) =>
+                !!img.closest(
+                    'header, nav, footer, [role=navigation], ' +
+                    '.menu, .mega-menu, .mobile-menu, .offcanvas, ' +
+                    '#menu, #site-navigation, #mobile-menu'
+                );
+
+            const urls = Array.from(root.querySelectorAll('img'))
+                // Safety: if the theme injects menu DOM inside root for any reason, drop it.
+                .filter(img => !isInNavOrMenu(img))
+                .map(pickSrc)
+                .filter(Boolean);
+
+            return Array.from(new Set(urls));
+        }
+    ");
 
     await browser.CloseAsync();
     return (content, images.Where(src => !string.IsNullOrWhiteSpace(src)).Distinct().ToList());
