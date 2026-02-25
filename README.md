@@ -3,64 +3,93 @@ Pulls large images from wordpress site, kadampa.org/news
 
 ## Overview
 
-This application automatically downloads images from specific web pages, applies text overlays (such as titles, dates, and descriptions), and manages these images based on defined policies. This guide will walk you through setting up and configuring the application on your system.
+This application automatically downloads images from specific web pages, applies text overlays (such as titles, dates, and descriptions), and manages these images based on defined policies. It runs on **Windows, macOS, and Linux**.
 
 ## Requirements
 
-- .NET Core Runtime or SDK (Version 8 or higher).
+- .NET 10 Runtime or SDK.
 - An internet connection for downloading images.
 - Basic understanding of JSON configuration (for setting up `appsettings.json`).
+- **Windows**: Microsoft Edge (used by Playwright for scraping).
+- **macOS / Linux**: Playwright's bundled Chromium is used automatically.
 
 ## Installation Steps
 
-1. **Install .NET Core**: Make sure the .NET Core Runtime or SDK is installed on your system. You can download it from the [official Microsoft .NET website](https://dotnet.microsoft.com/download).
+1. **Install .NET**: Make sure the .NET 10 Runtime or SDK is installed on your system. Download from the [official Microsoft .NET website](https://dotnet.microsoft.com/download).
 
-2. **Download Application**: Obtain the application package from the provided source located under Releases on the right. It should include an executable file (e.g., `KadampaScreenSaver.exe`) and a configuration file (`appsettings.json`).
+2. **Download Application**: Obtain the application package from the provided source located under Releases on the right.
 
 3. **Extract Files**: Extract the downloaded package to a folder on your computer.
 
-4. **Install** scheduled task by running application. Running a second time will launch it immediately.
+4. **Install Playwright browsers** (first run):
+   ```bash
+   pwsh bin/Debug/net10.0/playwright.ps1 install chromium
+   ```
 
-5. **Verify** Open Task Scheduler (Start Menu > Programs > Administrative Tools) - Verify Kadampa News is listed.
+5. **Run the application**:
+   - **Windows**: `KadampaScreenSaver.exe` — also registers a daily Task Scheduler task automatically.
+   - **macOS**: `./KadampaScreenSaver` — creates a LaunchAgent plist if configured.
+   - **Linux**: `./KadampaScreenSaver` — creates a cron job if configured.
 
-6. **Screensaver** Change to Photos. Settings to Browse - under Photos / Kadampa Pbotos (or configured).
+6. **Set up as screensaver**:
+   - **Windows**: Settings > Personalization > Lock screen > Screen saver > Photos. Browse to the configured image directory.
+   - **macOS**: System Settings > Screen Saver. Point to the configured image directory.
+   - **Linux**: Use your desktop environment's screensaver/slideshow settings with the configured image directory.
 
 7. **May Dharma Flourish**.
 
 ## Configuration
 
-Before running the application, you need to configure it by editing the `appsettings.json` file. This file contains various settings that control the application's behavior.
+Edit `appsettings.json` to control the application's behavior.
 
 ### Basic Configuration
 
+- **StartPage**: The URL to scrape for images (default: `https://kadampa.org/news`).
 - **Policies**: Set the depth of links to follow (`LinkDepth`) and the number of days to retain downloaded images (`RetentionDays`).
-- **Directories**: Configure the base directory for saving images (`Base`). If you prefer to use your 'My Pictures' folder, set `UseMyPictures` to `true`.
-- **PhotoText**: Customize text settings like font (`Font`) and whether to include the image file name or date on the image.
+- **Directories**: Configure the base directory for saving images (`Base`). Set `UseMyPictures` to `true` to use your Pictures folder (works on all platforms).
+- **PhotoText**: Customize text overlay settings like font (`Font`) and whether to include the image file name or date.
+- **Task Scheduler**: Set `StartTime` (e.g. `"05:30"`) to register a daily scheduled task. Remove or leave empty to skip.
 
-### Advanced Configuration
+### Cross-Platform Notes
 
-- **Brand Colors**: The application uses a predefined set of colors for text overlay. If necessary, these can be modified by an experienced user familiar with color codes.
+| Setting | Windows | macOS | Linux |
+|---------|---------|-------|-------|
+| `Directories:Base` | `d:/temp/` | `/tmp/` or `~/Pictures/` | `/tmp/` or `~/Pictures/` |
+| `PhotoText:Font` | `Palatino Linotype` | `Palatino` | `DejaVu Serif` or `Liberation Serif` |
+| `Directories:UseMyPictures` | `C:\Users\{name}\Pictures` | `~/Pictures` | `~/Pictures` |
 
 ### Example Configuration
 
-Here's an example snippet of the `appsettings.json` file:
-
 ```json
 {
+  "StartPage": "https://kadampa.org/news",
   "Policies": {
-    "LinkDepth": 5,
-    "RetentionDays": 30
+    "LinkDepth": 7,
+    "RetentionDays": 7
+  },
+  "Task Scheduler": {
+    "StartTime": "05:30"
   },
   "Directories": {
-    "Base": "C:\\Images",
-    "UseMyPictures": false,
-    "SubDirectory": "DownloadedImages"
+    "UseMyPictures": true,
+    "PhotoText": true,
+    "SubDirectory": "KadampaScreenSaver"
   },
   "PhotoText": {
-    "Font": "Arial",
-    "ImageFileName": true,
+    "Font": "Palatino Linotype",
     "DateInclude": true,
-    "DateFormat": "MM-dd-yyyy",
-    "DatePrefix": " - "
+    "DateFormat": "MM/dd",
+    "DatePrefix": " - ",
+    "ImageFileName": false,
+    "RemoveDashKadampaBuddhism": true
   }
 }
+```
+
+## Scheduling
+
+The application automatically sets up platform-native scheduling when `Task Scheduler:StartTime` is configured:
+
+- **Windows**: Creates a Windows Task Scheduler daily task.
+- **macOS**: Creates a LaunchAgent plist in `~/Library/LaunchAgents/`. You may need to run `launchctl load <path>` to activate it.
+- **Linux**: Adds a cron job to the current user's crontab.
