@@ -47,6 +47,14 @@ modules actually accept a custom folder.
 
 ## 6. End-user setup
 
+> **Fastest path:** run [`macos/install.sh`](install.sh) from the repo
+> root. It executes §6.1–§6.5 automatically (install .NET 10 to
+> `$HOME/.dotnet`, publish for the local arch, install Playwright
+> Chromium, apply macOS-friendly defaults to `appsettings.json`). Pass
+> `--run` to also download images once and open the output folder, and
+> `--schedule` to also enable the daily LaunchAgent. The manual steps
+> below are what the script does, in case you want to do it yourself.
+
 ### 6.1 Prerequisites
 - macOS 13 (Ventura) or newer. Sonoma 14 / Sequoia 15 tested.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) installed
@@ -73,10 +81,14 @@ Substitute `osx-x64` on Intel Macs. Output lands in
 The first time the app runs (or ahead of time), install Chromium for
 Playwright:
 ```bash
-cd dist/macos
-./playwright.ps1 install chromium    # if pwsh is installed
-# or:
+# Install the Playwright .NET CLI tool once:
 dotnet tool install --global Microsoft.Playwright.CLI
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+
+# The CLI auto-discovers Playwright from a csproj, so run it from the
+# project directory (not from the publish output):
+cd KadampaScreenSaver
 playwright install chromium
 ```
 This drops Chromium into `~/Library/Caches/ms-playwright/`.
