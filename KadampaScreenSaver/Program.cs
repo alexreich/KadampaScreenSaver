@@ -626,12 +626,34 @@ void DrawTextOnImage(SKCanvas canvas, SKBitmap bitmap, string? text,
         bestSize = size;
     }
 
-    // 4) Draw it for real
+    // 4) Draw it for real — stroke (outline) first, then fill, so letters
+    //    remain readable when the background under them has mixed light/dark
+    //    patches that would otherwise swallow a single-color fill.
     using var font = new SKFont(typeface, bestSize);
-    using var paint = new SKPaint
+
+    // Outline is the opposite luminance of the fill. Dark fill gets a white
+    // halo; light fill gets a black halo.
+    SKColor outlineColor = ToRelativeLuminance(textColor) < 0.5
+        ? SKColors.White
+        : SKColors.Black;
+
+    // Stroke width scales with font size but is clamped so small descriptions
+    // don't get muddy and giant titles don't get cartoonish.
+    float strokeWidth = Math.Clamp(bestSize * 0.09f, 2.0f, 6.0f);
+
+    using var strokePaint = new SKPaint
+    {
+        Color = outlineColor,
+        IsAntialias = true,
+        Style = SKPaintStyle.Stroke,
+        StrokeWidth = strokeWidth,
+        StrokeJoin = SKStrokeJoin.Round
+    };
+    using var fillPaint = new SKPaint
     {
         Color = textColor,
-        IsAntialias = true
+        IsAntialias = true,
+        Style = SKPaintStyle.Fill
     };
 
     var wrappedLines = WrapText(text, font, boxWidth);
@@ -640,7 +662,7 @@ void DrawTextOnImage(SKCanvas canvas, SKBitmap bitmap, string? text,
     float startY;
     if (isHeader)
     {
-        startY = boxTop + 5 + font.Spacing; // a little padding + baseline offset
+        startY = boxTop + 5 + font.Spacing;
     }
     else
     {
@@ -649,7 +671,8 @@ void DrawTextOnImage(SKCanvas canvas, SKBitmap bitmap, string? text,
 
     foreach (var line in wrappedLines)
     {
-        canvas.DrawText(line, boxLeft, startY, SKTextAlign.Left, font, paint);
+        canvas.DrawText(line, boxLeft, startY, SKTextAlign.Left, font, strokePaint);
+        canvas.DrawText(line, boxLeft, startY, SKTextAlign.Left, font, fillPaint);
         startY += font.Spacing;
     }
 }
