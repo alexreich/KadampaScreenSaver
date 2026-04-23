@@ -1,84 +1,40 @@
-﻿// File: KadampaScreenSaver/Program.cs
+// File: KadampaScreenSaver/Program.cs
 using System;
-using System.Diagnostics;
-using System.Drawing;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Drawing.Imaging;
-using System.Linq;
-using static System.Net.Mime.MediaTypeNames;
-using System.Net;
-using Microsoft.Win32.TaskScheduler;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
-using TaskServiceTask = Microsoft.Win32.TaskScheduler.Task;
-using Task = System.Threading.Tasks.Task;
-using System.Globalization;
 using Microsoft.Playwright;
 using KadampaScreenSaver;
+using SkiaSharp;
 
 HttpClient client = new HttpClient();
-ILogger<Program> logger = null;
+ILogger<Program> logger = null!;
 IConfigurationRoot configuration = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", true, true)
     .Build();
 
-
-if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-    if (configuration.GetValue<string>("Task Scheduler:StartTime") != null)
-    {
-        using (TaskService ts = new TaskService())
-        {
-            bool found = false;
-            foreach (TaskServiceTask task in ts.RootFolder.Tasks)
-            {
-                if (task.Name == System.AppDomain.CurrentDomain.FriendlyName)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-            {
-                TaskDefinition td = ts.NewTask();
-                td.RegistrationInfo.Author = "kadampa@alexreich.com";
-                td.RegistrationInfo.Description = "Kadampa News Service for KadampaScreenSaver";
-                td.Actions.Add(new ExecAction(Process.GetCurrentProcess().MainModule.FileName));
-
-                DailyTrigger trigger = new DailyTrigger
-                {
-                    StartBoundary = DateTime.Today.Add(TimeSpan.Parse(configuration.GetValue<string>("Task Scheduler:StartTime"))), // Set the start time to 5 AM today
-                    DaysInterval = 1 // Run every day
-                };
-
-                td.Triggers.Add(trigger);
-
-                ts.RootFolder.RegisterTaskDefinition(System.AppDomain.CurrentDomain.FriendlyName, td);
-
-                Console.WriteLine($"Task {System.AppDomain.CurrentDomain.FriendlyName} successfully registered!");
-            }
-        }
-    }
+// Cross-platform task scheduling
+TaskRegistration.EnsureDailyTaskIfConfigured(configuration, null);
 
 int linkDepth = configuration.GetValue<int>("Policies:LinkDepth");
 int retentionDays = configuration.GetValue<int>("Policies:RetentionDays");
-string baseDirectory = configuration.GetValue<string>("Directories:Base");
-string subDirectory = configuration.GetValue<string>("Directories:SubDirectory");
-string fontName = configuration.GetValue<string>("PhotoText:Font");
+string baseDirectory = configuration.GetValue<string>("Directories:Base") ?? "";
+string subDirectory = configuration.GetValue<string>("Directories:SubDirectory") ?? "KadampaScreenSaver";
+string fontName = configuration.GetValue<string>("PhotoText:Font") ?? "sans-serif";
+
 // Define Kadampa brand colors
-List<Color> brandColors = new List<Color>
-                            {
-                                ColorTranslator.FromHtml("#224486"), // Dark Blue
-                                ColorTranslator.FromHtml("#A99886"), // Beige
-                                ColorTranslator.FromHtml("#66B9C4"), // Light Blue
-                                ColorTranslator.FromHtml("#358DCB"), // Medium Blue
-                                ColorTranslator.FromHtml("#BE303C"), // Red
-                                ColorTranslator.FromHtml("#48ADF4")  // Sky Blue
-                            };
+List<SKColor> brandColors = new List<SKColor>
+{
+    SKColor.Parse("#224486"), // Dark Blue
+    SKColor.Parse("#A99886"), // Beige
+    SKColor.Parse("#66B9C4"), // Light Blue
+    SKColor.Parse("#358DCB"), // Medium Blue
+    SKColor.Parse("#BE303C"), // Red
+    SKColor.Parse("#48ADF4")  // Sky Blue
+};
+
 if (configuration.GetValue<bool>("Directories:UseMyPictures"))
 {
     baseDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), subDirectory);
@@ -98,7 +54,7 @@ using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
 
 logger = loggerFactory.CreateLogger<Program>();
 
-string webpageUrl = configuration.GetValue<string>("StartPage");
+string webpageUrl = configuration.GetValue<string>("StartPage") ?? "https://kadampa.org/news";
 Directory.CreateDirectory(baseDirectory);
 
 // Create UrlLogger instance (store log file in baseDirectory for convenience)
@@ -116,8 +72,9 @@ string htmlContent = await DownloadHtmlContentAsync(webpageUrl);
 var pageUrls = Regex.Matches(htmlContent, "<a.*?href=[\"'](.*?)[\"']")
     .Cast<Match>()
     .Select(m => m.Groups[1].Value)
-    // resolve relative → absolute
-    .Select(href => {
+    // resolve relative -> absolute
+    .Select(href =>
+    {
         var u = new Uri(href, UriKind.RelativeOrAbsolute);
         return u.IsAbsoluteUri
             ? u
@@ -186,9 +143,6 @@ foreach (string pageUrl in pageUrls)
         }
 
         filteredImageUrls.Add(imageUrl);
-
-        if (imageUrl.Contains("Arizona-Shrine") || imageUrl.Contains("Kadam-") || imageUrl.Contains("International-Project"))
-            System.Diagnostics.Debugger.Break();
     }
     var html = await LoadContentAndImagesAsync(pageUrl);
     var doc = new HtmlDocument();
@@ -205,12 +159,12 @@ foreach (string pageUrl in pageUrls)
             string fileName = Path.GetFileName(imageUrl);
 
             DateTime futureDate = new DateTime(9999, 12, 31);
-            DateTime publishedDate = DateTime.UtcNow; // Use current date as published date
+            DateTime publishedDate = DateTime.UtcNow;
             TimeSpan dateDifference = futureDate - publishedDate;
-            long reverseOrder = dateDifference.Days; // Unique for each day
+            long reverseOrder = dateDifference.Days;
 
-            string identifier = reverseOrder.ToString("0000000"); // Ensures padding
-            fileName = identifier + "_" + fileName; // Prepend to fileName
+            string identifier = reverseOrder.ToString("0000000");
+            fileName = identifier + "_" + fileName;
 
             string savePath = Path.Combine(baseDirectory, fileName);
 
@@ -223,11 +177,10 @@ foreach (string pageUrl in pageUrls)
             byte[] imageBytes = File.ReadAllBytes(savePath);
             bool deleteImage = false;
             using (var memoryStream = new MemoryStream(imageBytes))
-            using (var image = System.Drawing.Image.FromStream(memoryStream))
+            using (var bitmap = SKBitmap.Decode(memoryStream))
             {
-                if (image.Width < 1024)
+                if (bitmap == null || bitmap.Width < 1024)
                 {
-                    // Set flag to delete image if width is less than 1024
                     deleteImage = true;
                 }
                 else
@@ -245,40 +198,45 @@ foreach (string pageUrl in pageUrls)
             {
                 if (configuration.GetValue<bool>("Directories:PhotoText"))
                 {
-                    // Add text to image
-                    Bitmap newBitmap;
-                    using (Bitmap bitmap = (Bitmap)System.Drawing.Image.FromFile(savePath))
+                    // Add text to image using SkiaSharp
+                    using var bitmap = SKBitmap.Decode(savePath);
+                    if (bitmap != null)
                     {
-                        using (Graphics graphics = Graphics.FromImage(bitmap))
-                        {
-                            string imageNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
-                            string textToAdd = $"{title}";
-                            if (configuration.GetValue<bool>("PhotoText:DateInclude"))
-                            {
-                                textToAdd += configuration.GetValue<string>("PhotoText:DatePrefix");
-                                textToAdd += $"{DateTime.UtcNow.ToString(configuration.GetValue<string>("PhotoText:DateFormat"))}";
-                            }
-                            if (configuration.GetValue<bool>("PhotoText:ImageFileName"))
-                            {
-                                textToAdd += $"\n{imageNameWithoutExtension}";
-                            }
+                        using var canvas = new SKCanvas(bitmap);
 
-                            DrawTextOnImage(graphics, bitmap, textToAdd, fontName, brandColors, true);
-                            DrawTextOnImage(graphics, bitmap, ogDescription, fontName, brandColors, false);
+                        string imageNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+                        string textToAdd = $"{title}";
+                        if (configuration.GetValue<bool>("PhotoText:DateInclude"))
+                        {
+                            textToAdd += configuration.GetValue<string>("PhotoText:DatePrefix");
+                            textToAdd += $"{DateTime.UtcNow.ToString(configuration.GetValue<string>("PhotoText:DateFormat"))}";
                         }
-                        newBitmap = new Bitmap(bitmap);
+                        if (configuration.GetValue<bool>("PhotoText:ImageFileName"))
+                        {
+                            textToAdd += $"\n{imageNameWithoutExtension}";
+                        }
+
+                        DrawTextOnImage(canvas, bitmap, textToAdd, fontName, brandColors, true);
+                        DrawTextOnImage(canvas, bitmap, ogDescription, fontName, brandColors, false);
+
+                        canvas.Flush();
+
+                        // Save back to file
+                        var format = GetImageFormat(savePath);
+                        using var image = SKImage.FromBitmap(bitmap);
+                        using var data = image.Encode(format, 95);
+                        using var stream = File.OpenWrite(savePath);
+                        stream.SetLength(0);
+                        data.SaveTo(stream);
                     }
 
-                    newBitmap.Save(savePath); // Save the image file
-                    newBitmap.Dispose();
-                    File.SetCreationTime(savePath, DateTime.UtcNow);
+                    try { File.SetCreationTime(savePath, DateTime.UtcNow); } catch { /* not supported on all platforms */ }
                     File.SetLastWriteTime(savePath, DateTime.UtcNow);
                 }
             }
         }
         catch (Exception ex)
         {
-            // Logging error in downloading image
             logger.LogError($"Error downloading image: {imageUrl}. Error: {ex.Message}");
         }
     });
@@ -297,9 +255,8 @@ foreach (string file in files)
 {
     FileInfo fileInfo = new FileInfo(file);
     if ((currentDate - fileInfo.LastWriteTime).TotalDays > retentionDays ||
-        !new[] { ".jpg", ".jpeg", ".gif", ".bmp", ".mp4", ".log" }.Contains(fileInfo.Extension))
+        !new[] { ".jpg", ".jpeg", ".gif", ".bmp", ".png", ".mp4", ".log" }.Contains(fileInfo.Extension))
     {
-        // Delete old files
         try
         {
             File.Delete(file);
@@ -312,15 +269,42 @@ foreach (string file in files)
     }
 }
 
-// At the very end, cleanup again (optional)
+// Cleanup again
 urlLogger.Cleanup(30);
+
+
+// ─── Helper methods ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// Returns the appropriate Playwright browser channel for the current OS.
+/// Windows uses Edge; other platforms use Playwright's bundled Chromium.
+/// </summary>
+string? GetBrowserChannel()
+{
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        return "msedge";
+    // On Linux/macOS, null = use Playwright's bundled Chromium
+    return null;
+}
+
+/// <summary>
+/// Returns a platform-appropriate user agent string.
+/// </summary>
+string GetUserAgent()
+{
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36";
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36";
+    return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36";
+}
 
 async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsync(string url)
 {
     using var playwright = await Playwright.CreateAsync();
     var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
     {
-        Channel = "msedge",
+        Channel = GetBrowserChannel(),
         Headless = true,
         IgnoreDefaultArgs = new[] { "--enable-automation" },
         Args = new[] { "--disable-blink-features=AutomationControlled" }
@@ -328,8 +312,7 @@ async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsy
 
     var context = await browser.NewContextAsync(new BrowserNewContextOptions
     {
-        UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36",
+        UserAgent = GetUserAgent(),
         ViewportSize = new ViewportSize { Width = 1920, Height = 1080 }
     });
 
@@ -362,7 +345,6 @@ async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsy
 
     var images = await page.EvaluateAsync<string[]>(@"
         () => {
-            // Prefer the real post body; fall back to the article; last resort: document body.
             const root =
                 document.querySelector('main article .entry-content') ||
                 document.querySelector('article .entry-content') ||
@@ -386,7 +368,6 @@ async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsy
                 );
 
             const urls = Array.from(root.querySelectorAll('img'))
-                // Safety: if the theme injects menu DOM inside root for any reason, drop it.
                 .filter(img => !isInNavOrMenu(img))
                 .map(pickSrc)
                 .filter(Boolean);
@@ -399,69 +380,14 @@ async Task<(string htmlContent, List<string> imageUrls)> LoadContentAndImagesAsy
     return (content, images.Where(src => !string.IsNullOrWhiteSpace(src)).Distinct().ToList());
 }
 
-Color FindContrastingColor(Color baseColor, List<Color> brandColors)
-{
-    Color contrastingColor = brandColors[0];
-    double maxDistance = 0;
-
-    foreach (var brandColor in brandColors)
-    {
-        // Calculate the Euclidean distance in the RGB space
-        double distance = Math.Sqrt(
-            Math.Pow(brandColor.R - baseColor.R, 2) +
-            Math.Pow(brandColor.G - baseColor.G, 2) +
-            Math.Pow(brandColor.B - baseColor.B, 2));
-
-        if (distance > maxDistance)
-        {
-            maxDistance = distance;
-            contrastingColor = brandColor;
-        }
-    }
-
-    return contrastingColor;
-}
-Color CalculateAverageColor(Bitmap bmp, int startYPercent, int endYPercent)
-{
-    int height = bmp.Height;
-    int startY = height * startYPercent / 100;
-    int endY = height * endYPercent / 100;
-
-    long totalR = 0, totalG = 0, totalB = 0;
-    long pixelCount = 0;
-
-    for (int y = startY; y < endY; y++)
-    {
-        for (int x = 0; x < bmp.Width; x++)
-        {
-            Color c = bmp.GetPixel(x, y);
-            totalR += c.R;
-            totalG += c.G;
-            totalB += c.B;
-            pixelCount++;
-        }
-    }
-
-    int avgR = (int)(totalR / pixelCount);
-    int avgG = (int)(totalG / pixelCount);
-    int avgB = (int)(totalB / pixelCount);
-
-    return Color.FromArgb(avgR, avgG, avgB);
-}
-
-
-
 async Task DownloadFile(string url, string outputPath)
 {
     logger.LogInformation(url, outputPath);
     byte[] data = await client.GetByteArrayAsync(url);
 
-    // Check if file already exists
     if (File.Exists(outputPath))
     {
         File.Delete(outputPath);
-        //logger.LogWarning($"File already exists: {outputPath}");
-        //return;
     }
 
     await File.WriteAllBytesAsync(outputPath, data);
@@ -471,28 +397,20 @@ async Task<string> DownloadHtmlContentAsync(string url)
 {
     using var playwright = await Playwright.CreateAsync();
 
-    // Try launching local Chrome with stealth-like args
     var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
     {
-        Channel = "msedge", // or "msedge"
+        Channel = GetBrowserChannel(),
         Headless = true,
         IgnoreDefaultArgs = new[] { "--enable-automation" },
-        Args = new[]
-        {
-            "--disable-blink-features=AutomationControlled"
-        }
+        Args = new[] { "--disable-blink-features=AutomationControlled" }
     });
 
-    // Create a context that spoofs typical browser properties
     var context = await browser.NewContextAsync(new BrowserNewContextOptions
     {
-        UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/110.0.5481.77 Safari/537.36",
+        UserAgent = GetUserAgent(),
         ViewportSize = new ViewportSize { Width = 1920, Height = 1080 }
-        // you can also set deviceScaleFactor, locale, timezoneId, geolocation, etc.
     });
 
-    // Hide 'webdriver' property
     await context.AddInitScriptAsync(@"() => {
         Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined
@@ -507,12 +425,7 @@ async Task<string> DownloadHtmlContentAsync(string url)
         Timeout = 60000
     });
 
-    // Wait for some element to confirm the page loaded
     await page.WaitForSelectorAsync("body", new PageWaitForSelectorOptions { Timeout = 10000 });
-
-    // Or wait for a specific item that indicates content is fully loaded
-    // await page.WaitForSelectorAsync("a[href^='https://kadampa.org/2025']");
-
     await page.WaitForTimeoutAsync(2000);
 
     string content = await page.ContentAsync();
@@ -520,25 +433,25 @@ async Task<string> DownloadHtmlContentAsync(string url)
     return content;
 }
 
-// Convert 0–255 sRGB => linear space => L
-double ToRelativeLuminance(Color c)
+
+// ─── Image / color helpers (SkiaSharp) ────────────────────────────────────────
+
+SKEncodedImageFormat GetImageFormat(string path)
 {
-    // sRGB => linear
-    double Rsrgb = c.R / 255.0;
-    double Gsrgb = c.G / 255.0;
-    double Bsrgb = c.B / 255.0;
-
-    double R = (Rsrgb <= 0.03928) ? (Rsrgb / 12.92) : Math.Pow((Rsrgb + 0.055) / 1.055, 2.4);
-    double G = (Gsrgb <= 0.03928) ? (Gsrgb / 12.92) : Math.Pow((Gsrgb + 0.055) / 1.055, 2.4);
-    double B = (Bsrgb <= 0.03928) ? (Bsrgb / 12.92) : Math.Pow((Bsrgb + 0.055) / 1.055, 2.4);
-
-    // Per W3C formula: L = 0.2126*R + 0.7152*G + 0.0722*B
-    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+    var ext = Path.GetExtension(path).ToLowerInvariant();
+    return ext switch
+    {
+        ".png" => SKEncodedImageFormat.Png,
+        ".gif" => SKEncodedImageFormat.Gif,
+        ".bmp" => SKEncodedImageFormat.Bmp,
+        ".webp" => SKEncodedImageFormat.Webp,
+        _ => SKEncodedImageFormat.Jpeg
+    };
 }
-Color FindBestTextColor(Color background, List<Color> brandColors)
+
+SKColor FindBestTextColor(SKColor background, List<SKColor> brandColors)
 {
-    // First, find which brand color yields the highest ratio
-    Color bestBrand = brandColors[0];
+    SKColor bestBrand = brandColors[0];
     double bestRatio = 0.0;
 
     foreach (var brandColor in brandColors)
@@ -551,33 +464,40 @@ Color FindBestTextColor(Color background, List<Color> brandColors)
         }
     }
 
-    // If that brand color is still too low, check black/white
-    // (You can choose your own threshold, e.g. 4.5 or 3.0.)
     const double minReadableRatio = 3.0;
 
     if (bestRatio >= minReadableRatio)
-    {
-        return bestBrand; // good enough
-    }
+        return bestBrand;
 
-    // Try black & white
-    double blackRatio = GetContrastRatio(Color.Black, background);
-    double whiteRatio = GetContrastRatio(Color.White, background);
+    double blackRatio = GetContrastRatio(SKColors.Black, background);
+    double whiteRatio = GetContrastRatio(SKColors.White, background);
 
     if (blackRatio > whiteRatio)
     {
-        if (blackRatio >= minReadableRatio) return Color.Black;
-        return bestBrand; // fallback to brand color if black is also too low
+        if (blackRatio >= minReadableRatio) return SKColors.Black;
+        return bestBrand;
     }
     else
     {
-        if (whiteRatio >= minReadableRatio) return Color.White;
-        return bestBrand; // fallback
+        if (whiteRatio >= minReadableRatio) return SKColors.White;
+        return bestBrand;
     }
 }
 
-// ratio = (L1 + 0.05) / (L2 + 0.05), where L1 >= L2
-double GetContrastRatio(Color foreground, Color background)
+double ToRelativeLuminance(SKColor c)
+{
+    double Rsrgb = c.Red / 255.0;
+    double Gsrgb = c.Green / 255.0;
+    double Bsrgb = c.Blue / 255.0;
+
+    double R = (Rsrgb <= 0.03928) ? (Rsrgb / 12.92) : Math.Pow((Rsrgb + 0.055) / 1.055, 2.4);
+    double G = (Gsrgb <= 0.03928) ? (Gsrgb / 12.92) : Math.Pow((Gsrgb + 0.055) / 1.055, 2.4);
+    double B = (Bsrgb <= 0.03928) ? (Bsrgb / 12.92) : Math.Pow((Bsrgb + 0.055) / 1.055, 2.4);
+
+    return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+
+double GetContrastRatio(SKColor foreground, SKColor background)
 {
     double fLum = ToRelativeLuminance(foreground);
     double bLum = ToRelativeLuminance(background);
@@ -588,44 +508,118 @@ double GetContrastRatio(Color foreground, Color background)
     return (lighter + 0.05) / (darker + 0.05);
 }
 
-// General function to handle text drawing
-void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text,
-                     string fontName, List<Color> brandColors, bool isHeader)
+SKColor CalculateAverageColor(SKBitmap bmp, int startYPercent, int endYPercent)
 {
+    int height = bmp.Height;
+    int startY = height * startYPercent / 100;
+    int endY = height * endYPercent / 100;
+
+    long totalR = 0, totalG = 0, totalB = 0;
+    long pixelCount = 0;
+
+    for (int y = startY; y < endY; y++)
+    {
+        for (int x = 0; x < bmp.Width; x++)
+        {
+            SKColor c = bmp.GetPixel(x, y);
+            totalR += c.Red;
+            totalG += c.Green;
+            totalB += c.Blue;
+            pixelCount++;
+        }
+    }
+
+    byte avgR = (byte)(totalR / pixelCount);
+    byte avgG = (byte)(totalG / pixelCount);
+    byte avgB = (byte)(totalB / pixelCount);
+
+    return new SKColor(avgR, avgG, avgB);
+}
+
+/// <summary>
+/// Word-wraps text to fit within maxWidth using the given font.
+/// </summary>
+List<string> WrapText(string text, SKFont font, float maxWidth)
+{
+    var result = new List<string>();
+    foreach (var paragraph in text.Split('\n'))
+    {
+        var words = paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+        {
+            result.Add("");
+            continue;
+        }
+
+        var currentLine = words[0];
+        for (int i = 1; i < words.Length; i++)
+        {
+            var testLine = currentLine + " " + words[i];
+            if (font.MeasureText(testLine) > maxWidth)
+            {
+                result.Add(currentLine);
+                currentLine = words[i];
+            }
+            else
+            {
+                currentLine = testLine;
+            }
+        }
+        result.Add(currentLine);
+    }
+    return result;
+}
+
+/// <summary>
+/// Measures the total height of wrapped text.
+/// </summary>
+float MeasureWrappedTextHeight(string text, SKFont font, float maxWidth)
+{
+    var lines = WrapText(text, font, maxWidth);
+    return lines.Count * font.Spacing;
+}
+
+/// <summary>
+/// General function to handle text drawing on images using SkiaSharp.
+/// </summary>
+void DrawTextOnImage(SKCanvas canvas, SKBitmap bitmap, string? text,
+                     string fontName, List<SKColor> brandColors, bool isHeader)
+{
+    if (string.IsNullOrWhiteSpace(text)) return;
+
     // 1) Sample the background, pick a good foreground color
     int startPercent = isHeader ? 0 : 90;
     int endPercent = isHeader ? 10 : 100;
-    Color backgroundAvg = CalculateAverageColor(bitmap, startPercent, endPercent);
-    Color textColor = FindBestTextColor(backgroundAvg, brandColors);
+    SKColor backgroundAvg = CalculateAverageColor(bitmap, startPercent, endPercent);
+    SKColor textColor = FindBestTextColor(backgroundAvg, brandColors);
 
     // 2) Figure out our layout box
     float boxTop = bitmap.Height * startPercent / 100f;
     float boxHeight = bitmap.Height * (endPercent - startPercent) / 100f;
-    float boxWidth = bitmap.Width * 0.80f;          // 80% of the image width
-    float boxLeft = (bitmap.Width - boxWidth) / 2; // centered
+    float boxWidth = bitmap.Width * 0.80f;
+    float boxLeft = (bitmap.Width - boxWidth) / 2;
 
     // 3) Find the largest font size that fits both width and height
     int initialSize = isHeader ? 16 : 12;
     int bestSize = initialSize;
     const int maxSize = 72;
 
+    var typeface = SKTypeface.FromFamilyName(fontName) ?? SKTypeface.Default;
+
     for (int size = initialSize; size <= maxSize; size++)
     {
-        using var testFont = new System.Drawing.Font(fontName, size, GraphicsUnit.Pixel);
+        using var testFont = new SKFont(typeface, size);
 
-        // measure with wrapping at boxWidth
-        SizeF measured = graphics.MeasureString(
-            text,
-            testFont,
-            (int)boxWidth,
-            StringFormat.GenericDefault
-        );
-
-        if (measured.Width > boxWidth ||
-            measured.Height > boxHeight)
+        float measuredHeight = MeasureWrappedTextHeight(text, testFont, boxWidth);
+        float maxSingleLineWidth = 0;
+        foreach (var line in WrapText(text, testFont, boxWidth))
         {
-            // we’ve exceeded the box in either dimension,
-            // so stick with the last size that fit
+            float w = testFont.MeasureText(line);
+            if (w > maxSingleLineWidth) maxSingleLineWidth = w;
+        }
+
+        if (maxSingleLineWidth > boxWidth || measuredHeight > boxHeight)
+        {
             break;
         }
 
@@ -633,128 +627,41 @@ void DrawTextOnImage(Graphics graphics, Bitmap bitmap, string text,
     }
 
     // 4) Draw it for real
-    using var finalFont = new System.Drawing.Font(fontName, bestSize, GraphicsUnit.Pixel);
-    var sf = StringFormat.GenericDefault;
-    var layout = new RectangleF(boxLeft,
-                                isHeader
-                                  ? boxTop + 5              // a little padding
-                                  : boxTop + (boxHeight - graphics.MeasureString(text, finalFont, (int)boxWidth).Height) - 5,
-                                boxWidth,
-                                boxHeight);
+    using var font = new SKFont(typeface, bestSize);
+    using var paint = new SKPaint
+    {
+        Color = textColor,
+        IsAntialias = true
+    };
 
-    using var brush = new SolidBrush(textColor);
-    graphics.DrawString(text, finalFont, brush, layout, sf);
+    var wrappedLines = WrapText(text, font, boxWidth);
+    float totalTextHeight = wrappedLines.Count * font.Spacing;
+
+    float startY;
+    if (isHeader)
+    {
+        startY = boxTop + 5 + font.Spacing; // a little padding + baseline offset
+    }
+    else
+    {
+        startY = boxTop + (boxHeight - totalTextHeight) - 5 + font.Spacing;
+    }
+
+    foreach (var line in wrappedLines)
+    {
+        canvas.DrawText(line, boxLeft, startY, SKTextAlign.Left, font, paint);
+        startY += font.Spacing;
+    }
 }
 
-
-// Add the CleanText helper method
-static string CleanText(string input)
+static string CleanText(string? input)
 {
     if (string.IsNullOrEmpty(input))
         return string.Empty;
 
-    // Decode HTML entities
     string deEntitized = HtmlEntity.DeEntitize(input);
 
-    // Remove any remaining HTML tags
     var doc = new HtmlDocument();
     doc.LoadHtml(deEntitized);
     return doc.DocumentNode.InnerText;
 }
-public class UrlLogger
-{
-    private readonly string _filePath;
-    private readonly HashSet<string> _visited;
-
-    public UrlLogger(string filePath)
-    {
-        _filePath = filePath;
-        if (!File.Exists(_filePath))
-            File.WriteAllText(_filePath, "");
-
-        _visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Load & normalize every line we wrote previously
-        foreach (var line in File.ReadAllLines(_filePath))
-        {
-            var parts = line.Split('\t', 2);
-            if (parts.Length != 2) continue;
-
-            // parts[1] is the URL we logged (already normalized when written)
-            var norm = parts[1].Trim();
-            _visited.Add(norm);
-        }
-    }
-
-    /// <summary>
-    /// True if we've already visited this URL (in normalized form).
-    /// </summary>
-    public bool AlreadyVisited(string url)
-        => _visited.Contains(NormalizeUrl(url));
-
-    /// <summary>
-    /// Adds a timestamped entry of the normalized URL, if not already there.
-    /// </summary>
-    public void LogUrl(string url)
-    {
-        var norm = NormalizeUrl(url);
-        if (_visited.Add(norm))
-        {
-            var timestamp = DateTime.UtcNow.ToString("O"); // ISO‑8601
-            File.AppendAllText(_filePath, $"{timestamp}\t{norm}{Environment.NewLine}");
-        }
-    }
-
-    /// <summary>
-    /// Drops any logged URLs older than retentionDays, both on disk and in memory.
-    /// </summary>
-    public void Cleanup(int retentionDays)
-    {
-        if (!File.Exists(_filePath)) return;
-        var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
-
-        var keptLines = new List<string>();
-        foreach (var line in File.ReadAllLines(_filePath))
-        {
-            var parts = line.Split('\t', 2);
-            if (parts.Length != 2) continue;
-            if (DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out var time)
-                && time >= cutoff)
-            {
-                keptLines.Add(line);
-            }
-        }
-
-        // Rewrite only the kept entries
-        File.WriteAllLines(_filePath, keptLines);
-
-        // Refresh the in‑memory set
-        _visited.Clear();
-        foreach (var line in keptLines)
-        {
-            var urlPart = line.Split('\t', 2)[1].Trim();
-            _visited.Add(urlPart);
-        }
-    }
-
-    /// <summary>
-    /// Normalizes a URL by lower‑casing, trimming trailing slash on the path,
-    /// and preserving the query string.
-    /// </summary>
-    private string NormalizeUrl(string raw)
-    {
-        try
-        {
-            var uri = new Uri(raw);
-            var path = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
-            var query = uri.Query; // e.g. "?page=2" or ""
-            return (path + query).ToLowerInvariant();
-        }
-        catch
-        {
-            // If it's not a valid URI, just trim+lowercase it
-            return raw.Trim().ToLowerInvariant();
-        }
-    }
-}
-

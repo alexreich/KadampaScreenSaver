@@ -1,43 +1,97 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
-using System.Linq;
 
-namespace KadampaScreenSaver
+namespace KadampaScreenSaver;
+
+public class UrlLogger
 {
-    public class UrlLogger
+    private readonly string _filePath;
+    private readonly HashSet<string> _visited;
+
+    public UrlLogger(string filePath)
     {
-        private readonly string _logPath;
+        _filePath = filePath;
+        if (!File.Exists(_filePath))
+            File.WriteAllText(_filePath, "");
 
-        public UrlLogger(string logPath)
+        _visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var line in File.ReadAllLines(_filePath))
         {
-            _logPath = logPath;
-            if (!File.Exists(_logPath)) File.WriteAllText(_logPath, string.Empty);
+            var parts = line.Split('\t', 2);
+            if (parts.Length != 2) continue;
+            var norm = parts[1].Trim();
+            _visited.Add(norm);
+        }
+    }
+
+    /// <summary>
+    /// True if we've already visited this URL (in normalized form).
+    /// </summary>
+    public bool AlreadyVisited(string url)
+        => _visited.Contains(NormalizeUrl(url));
+
+    /// <summary>
+    /// Adds a timestamped entry of the normalized URL, if not already there.
+    /// </summary>
+    public void LogUrl(string url)
+    {
+        var norm = NormalizeUrl(url);
+        if (_visited.Add(norm))
+        {
+            var timestamp = DateTime.UtcNow.ToString("O");
+            File.AppendAllText(_filePath, $"{timestamp}\t{norm}{Environment.NewLine}");
+        }
+    }
+
+    /// <summary>
+    /// Drops any logged URLs older than retentionDays, both on disk and in memory.
+    /// </summary>
+    public void Cleanup(int retentionDays)
+    {
+        if (!File.Exists(_filePath)) return;
+        var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+
+        var keptLines = new List<string>();
+        foreach (var line in File.ReadAllLines(_filePath))
+        {
+            var parts = line.Split('\t', 2);
+            if (parts.Length != 2) continue;
+            if (DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out var time)
+                && time >= cutoff)
+            {
+                keptLines.Add(line);
+            }
         }
 
-        public void LogUrl(string url)
+        File.WriteAllLines(_filePath, keptLines);
+
+        _visited.Clear();
+        foreach (var line in keptLines)
         {
-            File.AppendAllLines(_logPath, new[] { $"{url}|{DateTime.UtcNow:O}" });
+            var urlPart = line.Split('\t', 2)[1].Trim();
+            _visited.Add(urlPart);
         }
+    }
 
-        public bool AlreadyVisited(string url)
+    /// <summary>
+    /// Normalizes a URL by lower-casing, trimming trailing slash on the path,
+    /// and preserving the query string.
+    /// </summary>
+    private static string NormalizeUrl(string raw)
+    {
+        try
         {
-            return File.ReadAllLines(_logPath)
-                       .Any(line => line.Split('|')[0].Equals(url, StringComparison.OrdinalIgnoreCase));
+            var uri = new Uri(raw);
+            var path = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+            var query = uri.Query;
+            return (path + query).ToLowerInvariant();
         }
-
-        public void Cleanup(int retentionDays)
+        catch
         {
-            if (!File.Exists(_logPath)) return;
-
-            var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
-            var entries = File.ReadAllLines(_logPath)
-                              .Select(line => line.Split('|'))
-                              .Where(parts => parts.Length == 2)
-                              .Select(parts => (url: parts[0], stamp: DateTime.Parse(parts[1])))
-                              .Where(e => e.stamp >= cutoff)
-                              .Select(e => $"{e.url}|{e.stamp:O}");
-            File.WriteAllLines(_logPath, entries);
+            return raw.Trim().ToLowerInvariant();
         }
     }
 }
